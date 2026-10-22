@@ -1,8 +1,9 @@
 """Seed the banking collections with sample data for every user.
 
-Creates one bank account per user and at least 20 transactions for that
-account. The account / routing numbers are encrypted by the service layer,
-so the script must go through `app.services.banking`.
+Creates one bank account per user, one demo debit card for that account and at
+least 20 transactions. The account / routing numbers are encrypted by the
+service layer, so the script must go through `app.services.banking`. Debit
+cards are only ever provisioned here (never during a conversation).
 
 Usage (from `backend/`):
     python -m scripts.seed_banking                 # every user
@@ -17,7 +18,8 @@ import random
 import sys
 from datetime import datetime, timedelta, timezone
 
-from app.services import banking, mongo
+from app.services import bank_actions, banking, mongo
+from app.services.owner import get_owner_user
 
 # --------------------------------------------------------------------------
 # Sample data
@@ -88,6 +90,13 @@ def seed_user(user: dict, min_transactions: int) -> tuple[int, int]:
         )
         created_account = 1
 
+    # Demo debit card (idempotent: the account keeps its existing card).
+    card = bank_actions.ensure_debit_card(
+        user_id=user_id,
+        account_id=account["account_id"],
+        card_number_last4=account.get("account_number_last4", ""),
+    )
+
     existing = mongo.transactions_collection().count_documents(
         {"user_id": user_id, "account_id": account["account_id"]}
     )
@@ -121,6 +130,7 @@ def seed_user(user: dict, min_transactions: int) -> tuple[int, int]:
     print(
         f"  {username}: account {'created' if created_account else 'kept'} "
         f"({account['bank_name']} / {account['account_number_masked']}), "
+        f"debit card {card['last4']} ({card['status']}), "
         f"transactions {existing} -> {existing + missing}"
     )
     return created_account, missing
@@ -144,8 +154,11 @@ def main() -> int:
 
     query = {"username": args.username} if args.username else {}
     users = list(mongo.users_collection().find(query))
+    if not users and not args.username:
+        # No account yet: resolve (and create on demand) the implicit owner.
+        users = [get_owner_user()]
     if not users:
-        print(f"No user found for {args.username!r}" if args.username else "No users found")
+        print(f"No user found for {args.username!r}")
         return 1
 
     print(f"Seeding {len(users)} user(s) with >= {args.min_transactions} transactions each:")

@@ -13,8 +13,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_current_user
 from app.services import ingestion, mongo, vectorstore
+from app.services.owner import get_owner_user
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -96,7 +96,7 @@ def _persist_source(
 @router.post("/upload", response_model=UploadResponse)
 def upload_files(
     files: list[UploadFile] = File(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> UploadResponse:
     """Ingest one or more files (chunk + embed + store in MongoDB Atlas).
 
@@ -139,7 +139,7 @@ def upload_files(
 @router.post("/url", response_model=FileRecord)
 def add_url(
     body: UrlRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> FileRecord:
     """Fetch a web page, ingest its readable text, and index it for RAG.
 
@@ -165,7 +165,7 @@ def add_url(
 
 
 @router.get("", response_model=list[FileRecord])
-def list_files(user: dict = Depends(get_current_user)) -> list[FileRecord]:
+def list_files(user: dict = Depends(get_owner_user)) -> list[FileRecord]:
     """All ingested sources of the current user (files + URLs), newest first."""
     records = (
         mongo.files_collection()
@@ -183,7 +183,7 @@ def list_files(user: dict = Depends(get_current_user)) -> list[FileRecord]:
 @router.delete("/{file_id}")
 def delete_file(
     file_id: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> dict[str, Any]:
     """Delete a source together with all of its chunks."""
     user_id = user["user_id"]

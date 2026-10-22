@@ -1,4 +1,4 @@
-# Backend (FastAPI + LangChain + MongoDB)
+# Backend (FastAPI + LangGraph + LangChain + MongoDB)
 fastapi
 uvicorn
 python-multipart
@@ -8,8 +8,10 @@ langchain-core
 langchain-text-splitters
 langchain-openai
 langchain-mongodb
+# LangGraph workflow orchestration + persistent MongoDB checkpoints
+langgraph
+langgraph-checkpoint-mongodb
 pymongo
-bcrypt
 # Encrypting sensitive banking fields (account / routing numbers)
 cryptography
 # Document loaders / splitters (type-aware ingestion)
@@ -24,3 +26,5 @@ beautifulsoup4
 playwright
 # Cross-encoder reranking of retrieved chunks
 sentence-transformers
+# Tests (no live LLM / MongoDB required)
+pytest

@@ -1,4 +1,4 @@
-"""Chat endpoint: RAG over the documents the user has ingested."""
+"""Chat endpoint: document RAG and bank operations through the LangGraph workflow."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_current_user
 from app.services import mongo
-from app.services.rag import answer_question
+from app.services.owner import get_owner_user
+from app.workflow.runner import run_workflow
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -44,7 +44,7 @@ def _derive_title(message: str) -> str:
 @router.post("", response_model=ChatResponse)
 def chat(
     body: ChatRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> ChatResponse:
     """Answer a message, persisting both turns in the conversation."""
     collections = mongo.collections_collection()
@@ -71,10 +71,15 @@ def chat(
 
     history = conversation.get("messages", [])
 
-    # ---- RAG generation (may fail on provider errors -> 502) -------------
+    # ---- Workflow turn (routing, bank auth/ops, or document RAG) ---------
+    # The conversation id doubles as the workflow thread id, so pending
+    # questions (slots, OTP, confirmation) are restored from the checkpoint.
     try:
-        result = answer_question(
-            question=body.message, history=history, user_id=user_id
+        result = run_workflow(
+            question=body.message,
+            conversation_id=conversation["conversation_id"],
+            user_id=user_id,
+            history=history,
         )
     except Exception as exc:
         raise HTTPException(
@@ -99,6 +104,9 @@ def chat(
         "created_at": _utcnow(),
         "sources": result.sources,
     }
+    # `result.status` is informational only (ok / needs_auth / needs_input /
+    # needs_confirmation / cancelled). The reply text already asks the user for
+    # whatever the workflow needs next.
 
     collections.update_one(
         {"conversation_id": conversation["conversation_id"], "user_id": user_id},

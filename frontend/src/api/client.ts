@@ -1,12 +1,6 @@
 // Thin fetch wrapper around the FastAPI backend (relative /api URLs).
-//
-// The session lives in an HttpOnly cookie, so every request is sent with
-// credentials. When the session expires the backend answers 401 - the client
-// raises an `ApiError` with status 401 and notifies the auth layer so the UI
-// can bounce the user back to the login screen.
 
 import type {
-  AuthResponse,
   BankAccount,
   BankAccountInput,
   BankingMeta,
@@ -31,25 +25,13 @@ export class ApiError extends Error {
   }
 }
 
-/** Fired whenever the backend rejects the call because the session is gone. */
-export const UNAUTHORIZED_EVENT = 'genrag:unauthorized'
-
-function notifyUnauthorized() {
-  window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT))
-}
-
-async function request<T>(
-  path: string,
-  init?: RequestInit,
-  options?: { notifyUnauthorized?: boolean },
-): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {}
   const isFormData = init?.body instanceof FormData
   if (!isFormData && init?.body) headers['Content-Type'] = 'application/json'
 
   const res = await fetch(`/api${path}`, {
     ...init,
-    credentials: 'include',
     headers: { ...headers, ...(init?.headers as object) },
   })
 
@@ -61,9 +43,6 @@ async function request<T>(
     } catch {
       /* non-JSON error body - keep statusText */
     }
-    if (res.status === 401 && options?.notifyUnauthorized !== false) {
-      notifyUnauthorized()
-    }
     throw new ApiError(detail, res.status)
   }
 
@@ -73,22 +52,6 @@ async function request<T>(
 
 export const api = {
   health: () => request<Health>('/health'),
-
-  // ---- auth ------------------------------------------------------------
-  login: (username: string, password: string) =>
-    request<AuthResponse>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    }),
-  register: (username: string, password: string) =>
-    request<AuthResponse>('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    }),
-  // `me` is the startup session probe: a 401 there simply means "not signed in",
-  // so it must not raise the global "session expired" notification.
-  me: () => request<AuthResponse>('/auth/me', undefined, { notifyUnauthorized: false }),
-  logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 
   // ---- conversations ----------------------------------------------------
   listConversations: () => request<ConversationSummary[]>('/conversations'),

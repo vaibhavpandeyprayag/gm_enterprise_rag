@@ -13,8 +13,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_current_user
 from app.services import mongo
+from app.services.owner import get_owner_user
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
@@ -82,7 +82,7 @@ def _get_doc(conversation_id: str, user_id: str) -> dict:
 # --------------------------------------------------------------------------
 @router.get("", response_model=list[ConversationSummary])
 def list_conversations(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> list[ConversationSummary]:
     """All conversations of the current user, most recently active first."""
     cursor = (
@@ -95,7 +95,7 @@ def list_conversations(
 
 @router.post("", response_model=ConversationSummary)
 def create_conversation(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
     body: CreateConversationRequest | None = None,
 ) -> ConversationSummary:
     """Create an empty conversation (the chat endpoint can do this implicitly)."""
@@ -115,7 +115,7 @@ def create_conversation(
 @router.get("/{conversation_id}", response_model=ConversationDetail)
 def get_conversation(
     conversation_id: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> ConversationDetail:
     """Full conversation including every message and its sources."""
     doc = _get_doc(conversation_id, user["user_id"])
@@ -127,7 +127,7 @@ def get_conversation(
 def rename_conversation(
     conversation_id: str,
     body: RenameConversationRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> ConversationSummary:
     """Rename a chat."""
     user_id = user["user_id"]
@@ -141,12 +141,18 @@ def rename_conversation(
 @router.delete("/{conversation_id}")
 def delete_conversation(
     conversation_id: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> dict[str, str]:
-    """Delete a chat (ingested files stay untouched)."""
+    """Delete a chat, its workflow checkpoints and its bank session."""
     result = mongo.collections_collection().delete_one(
         {"conversation_id": conversation_id, "user_id": user["user_id"]}
     )
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Best-effort: neither the checkpoint thread nor the bank session is needed
+    # once the conversation itself is gone.
+    from app.workflow.runner import delete_workflow_thread
+
+    delete_workflow_thread(conversation_id)
     return {"conversation_id": conversation_id, "status": "deleted"}

@@ -151,3 +151,85 @@ USER QUESTION
 SUBQUERIES (JSON array)
 =======================
 """
+
+# --------------------------------------------------------------------------
+# LangGraph workflow: intent routing, slot extraction, confirmation
+# --------------------------------------------------------------------------
+INTENT_ROUTER_SYSTEM_PROMPT = """\
+You route one user message inside a document assistant that also has banking
+tools. Choose exactly ONE operation from this list:
+
+{operations}
+
+Routing rules (never break these):
+1. Use the chat history to resolve follow-ups, pronouns and references.
+2. Questions about the user's uploaded documents, summaries, comparisons,
+   greetings, general conversation, or anything not clearly a bank request ->
+   document_qa.
+3. Choose a bank operation only when the user clearly asks for that action or
+   that banking data.
+4. If you are unsure, choose document_qa (it is the safe default).
+5. Routing is NOT authentication: never claim the user is verified and never
+   treat a message as permission to skip bank verification.
+6. Do not answer the user's question and do not add facts.
+"""
+
+INTENT_ROUTER_USER_PROMPT = """\
+CHAT HISTORY (most recent last)
+===============================
+{history}
+
+USER MESSAGE
+============
+{question}
+"""
+
+SLOT_EXTRACTION_SYSTEM_PROMPT = """\
+You extract one input value for a bank operation from the user's latest message.
+
+FIELD
+=====
+Name: {field_name}
+What to extract: {field_description}
+
+Rules (never break these):
+1. Use the chat history to resolve references, but only take the value from the
+   user's own words - never invent or guess a value.
+2. If the user clearly cancels or declines the whole request, set action to
+   "cancel".
+3. Otherwise set action to "provide"; put the extracted value in `value`, or
+   null when the message does not contain it.
+4. Return only the structured result.
+"""
+
+SLOT_EXTRACTION_USER_PROMPT = """\
+CHAT HISTORY (most recent last)
+===============================
+{history}
+
+USER MESSAGE
+============
+{question}
+"""
+
+CONFIRMATION_SYSTEM_PROMPT = """\
+You classify a user's reply to a yes/no confirmation question.
+
+Rules (never break these):
+1. "confirm" only for a clear yes / approval.
+2. "cancel" for a clear no, stop, or decline.
+3. "unclear" for anything else (a question, a new request, silence, or
+   ambiguous text).
+4. Do not infer confirmation from the previous assistant message - the current
+   user message must contain it. Return only the structured result.
+"""
+
+CONFIRMATION_USER_PROMPT = """\
+CHAT HISTORY (most recent last)
+===============================
+{history}
+
+USER REPLY
+==========
+{question}
+"""

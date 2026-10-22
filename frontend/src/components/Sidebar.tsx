@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { useAuth } from '../auth/AuthContext'
 import type { ConversationSummary } from '../types'
 
 interface Props {
@@ -15,7 +14,7 @@ interface Props {
   onOpenFiles: () => void
 }
 
-/** Left pane: brand, new-chat action, conversation history, files entry, account. */
+/** Left pane: brand, new-chat action, conversation history, files entry. */
 export default function Sidebar({
   open,
   conversations,
@@ -28,7 +27,6 @@ export default function Sidebar({
   onClose,
   onOpenFiles,
 }: Props) {
-  const { user, logout, expiresAt } = useAuth()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const editInputRef = useRef<HTMLInputElement>(null)
@@ -137,34 +135,6 @@ export default function Sidebar({
             Knowledge files
             <span className="count">{fileCount}</span>
           </button>
-
-          {user && (
-            <div className="account">
-              <div className="account-info">
-                <div className="account-name" title={user.username}>
-                  {user.username}
-                </div>
-                <div className="account-meta">
-                  {expiresAt
-                    ? `Session until ${new Date(expiresAt).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}`
-                    : 'Signed in'}
-                </div>
-              </div>
-              <button
-                className="icon-btn tiny"
-                onClick={() => void logout()}
-                aria-label="Log out"
-                title="Log out"
-              >
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.9">
-                  <path d="M15 17l5-5-5-5M20 12H9M12 20H6a2 2 0 01-2-2V6a2 2 0 012-2h6" />
-                </svg>
-              </button>
-            </div>
-          )}
         </div>
       </aside>
     </>

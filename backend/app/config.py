@@ -98,20 +98,20 @@ class Settings:
     url_render_wait_ms: int
     url_max_bytes: int
 
-    # Authentication / sessions
-    session_ttl_hours: int
-    session_cookie_name: str
-    session_cookie_secure: bool
-    session_cookie_samesite: str
-    session_cookie_domain: str | None
-    min_password_length: int
-    max_password_bytes: int
+    # Single-user mode: the account that owns all data (there is no login).
+    # When unset, the oldest account in `users` is used (see services/owner.py).
+    owner_username: str | None
+    owner_email: str
 
     # Banking (encrypted account numbers)
     # Comma-separated: the first key encrypts, every key is tried when decrypting
     # (that is what makes a key rotation safe).
     bank_encryption_keys: tuple[str, ...]
     bank_encryption_salt: str
+
+    # Bank authentication (conversation-scoped, server-side session)
+    bank_session_ttl_minutes: int
+    bank_otp_code: str
 
     # Server
     cors_origins: list[str] = field(default_factory=list)
@@ -166,16 +166,11 @@ def get_settings() -> Settings:
         url_render_timeout_ms=_env_int("URL_RENDER_TIMEOUT_MS", 30000),
         url_render_wait_ms=_env_int("URL_RENDER_WAIT_MS", 1500),
         url_max_bytes=_env_int("URL_MAX_BYTES", 5_000_000),
-        # --- authentication / sessions ---
-        session_ttl_hours=_env_int("SESSION_TTL_HOURS", 24),
-        session_cookie_name=_env("SESSION_COOKIE_NAME", "session_token"),
-        # Secure cookies require HTTPS - enable it when the app is served over TLS.
-        session_cookie_secure=_env_bool("SESSION_COOKIE_SECURE", False),
-        session_cookie_samesite=_env("SESSION_COOKIE_SAMESITE", "lax"),
-        session_cookie_domain=os.getenv("SESSION_COOKIE_DOMAIN") or None,
-        min_password_length=_env_int("MIN_PASSWORD_LENGTH", 8),
-        # bcrypt silently truncates beyond 72 bytes, so the limit is enforced upfront.
-        max_password_bytes=_env_int("MAX_PASSWORD_BYTES", 72),
+        # --- single-user mode (no login) ---
+        owner_username=os.getenv("OWNER_USERNAME") or None,
+        # Registered email the bank-authentication step verifies against (dev
+        # default; an existing account without an email is backfilled with it).
+        owner_email=(os.getenv("OWNER_EMAIL") or "owner@example.com").strip().lower(),
         # --- banking ---
         bank_encryption_keys=tuple(
             key.strip()
@@ -185,6 +180,9 @@ def get_settings() -> Settings:
         bank_encryption_salt=_env(
             "BANK_ENCRYPTION_SALT", "genrag.bank.v1"
         ),
+        # Conversation-scoped authorization (see services/bank_auth.py).
+        bank_session_ttl_minutes=_env_int("BANK_SESSION_TTL_MINUTES", 15),
+        bank_otp_code=_env("BANK_OTP_CODE", "123456"),
         cors_origins=_env_list(
             "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
         ),

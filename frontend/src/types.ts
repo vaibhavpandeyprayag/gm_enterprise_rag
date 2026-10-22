@@ -2,16 +2,6 @@
 
 export type Role = 'user' | 'assistant'
 
-export interface User {
-  user_id: string
-  username: string
-}
-
-export interface AuthResponse {
-  user: User
-  expires_at: string | null
-}
-
 export interface Source {
   index: number
   source: string

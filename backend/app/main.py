@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import auth, banking, chat, conversations, files
+from app.api import banking, chat, conversations, files
 from app.config import FRONTEND_DIST, get_settings
 from app.services import mongo, reranker
 
@@ -53,7 +53,6 @@ def create_app() -> FastAPI:
     )
 
     # ---- API routers ------------------------------------------------------
-    app.include_router(auth.router)
     app.include_router(files.router)
     app.include_router(conversations.router)
     app.include_router(chat.router)
@@ -73,10 +72,6 @@ def create_app() -> FastAPI:
                 "embedding_model": settings.jina_model,
                 "embedding_dim": settings.embedding_dim,
                 "supported_types": list(settings.supported_types),
-                "auth": {
-                    "session_ttl_hours": settings.session_ttl_hours,
-                    "cookie_secure": settings.session_cookie_secure,
-                },
             }
         )
 

@@ -22,14 +22,17 @@ from pathlib import Path
 # Allow `python scripts/claim_legacy.py` from the backend directory.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.services import auth, mongo  # noqa: E402
+from app.services import mongo  # noqa: E402
 
 
 def claim(username: str, dry_run: bool = False) -> int:
     """Assign every orphan document (no user_id) to `username`'s user_id."""
     user = mongo.users_collection().find_one({"username": username.strip().lower()})
     if not user:
-        print(f"User '{username}' does not exist - create it first (register in the UI).")
+        print(
+            f"User '{username}' does not exist - start the app once so the owner "
+            "account is created (or set OWNER_USERNAME in .env)."
+        )
         return 1
 
     user_id = user["user_id"]

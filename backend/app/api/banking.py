@@ -12,9 +12,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_current_user
 from app.services import banking
 from app.services.banking import BankingError
+from app.services.owner import get_owner_user
 
 router = APIRouter(prefix="/api", tags=["banking"])
 
@@ -97,7 +97,7 @@ def _changes(body: BaseModel) -> dict[str, Any]:
 # Bank accounts
 # --------------------------------------------------------------------------
 @router.get("/accounts")
-def list_accounts(user: dict = Depends(get_current_user)) -> list[dict]:
+def list_accounts(user: dict = Depends(get_owner_user)) -> list[dict]:
     """All bank accounts of the current user."""
     return banking.list_accounts(user["user_id"])
 
@@ -105,7 +105,7 @@ def list_accounts(user: dict = Depends(get_current_user)) -> list[dict]:
 @router.post("/accounts", status_code=201)
 def create_account(
     body: AccountIn,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> dict:
     """Add a bank account (the number is encrypted before it is stored)."""
     try:
@@ -115,7 +115,7 @@ def create_account(
 
 
 @router.get("/accounts/{account_id}")
-def get_account(account_id: str, user: dict = Depends(get_current_user)) -> dict:
+def get_account(account_id: str, user: dict = Depends(get_owner_user)) -> dict:
     """One bank account."""
     try:
         return banking.get_account(account_id, user["user_id"])
@@ -127,7 +127,7 @@ def get_account(account_id: str, user: dict = Depends(get_current_user)) -> dict
 def update_account(
     account_id: str,
     body: AccountPatch,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> dict:
     """Update a bank account."""
     try:
@@ -139,7 +139,7 @@ def update_account(
 @router.delete("/accounts/{account_id}")
 def delete_account(
     account_id: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> dict:
     """Delete a bank account together with its transactions."""
     try:
@@ -153,7 +153,7 @@ def delete_account(
 # --------------------------------------------------------------------------
 @router.get("/transactions", response_model=TransactionPage)
 def list_transactions(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
     account_id: str | None = Query(default=None, description="Filter by account"),
     limit: int = Query(default=banking.DEFAULT_PAGE_SIZE, ge=1, le=banking.MAX_PAGE_SIZE),
     offset: int = Query(default=0, ge=0),
@@ -175,7 +175,7 @@ def list_transactions(
 @router.post("/transactions", status_code=201)
 def create_transaction(
     body: TransactionIn,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> dict:
     """Record a transaction. Negative amounts are debits, positive are credits."""
     try:
@@ -189,7 +189,7 @@ def create_transaction(
 @router.get("/transactions/{transaction_id}")
 def get_transaction(
     transaction_id: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> dict:
     """One transaction."""
     try:
@@ -202,7 +202,7 @@ def get_transaction(
 def update_transaction(
     transaction_id: str,
     body: TransactionPatch,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> dict:
     """Update a transaction."""
     try:
@@ -216,7 +216,7 @@ def update_transaction(
 @router.delete("/transactions/{transaction_id}")
 def delete_transaction(
     transaction_id: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(get_owner_user),
 ) -> dict:
     """Delete a transaction."""
     try:

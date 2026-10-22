@@ -29,11 +29,15 @@ This is a general purpose RAG application/chatbot that can ingest multiple files
 - Maintain modular and configurable style of coding.
 - Give comments wherever necessary.
 
-### Authentication & multi-tenancy
-- Users sign in with a username and password (bcrypt-hashed); the RAG page opens only after a successful sign-in.
-- The session is maintained in an HttpOnly cookie backed by a `sessions` collection in MongoDB Atlas; it expires **24 hours** after sign-in, and the user is logged out automatically.
-- Every record (`files`, `chunks`, `conversations`) carries a `user_id`; all queries and the vector search are filtered by it, so users never see each other's data.
-- The Atlas Vector Search index declares `user_id` as a *filter* field - retrieval uses a `pre_filter` on `user_id`.
+### Single user (no login)
+- There is no login or signup; the RAG page opens directly.
+- Every record (`files`, `chunks`, `conversations`, banking data) still carries a `user_id`; all queries use `get_owner_user()` (`backend/app/services/owner.py`) so the data stays scoped to one account.
+- The owner is `OWNER_USERNAME` from `.env` when set, otherwise the oldest account in `users`, otherwise a `local` account created on first use.
+- The Atlas Vector Search index still declares `user_id` as a *filter* field - retrieval uses a `pre_filter` on `user_id`.
+- When a question asks for bank details, the workflow asks for authentication first (registered email + dummy OTP).
+- Chat turns run through the LangGraph workflow in `backend/app/workflow/` (intent routing, auth, slot filling, confirmation, tools). Thread id = `conversation_id`; checkpoints live in `workflow_checkpoints` / `workflow_writes`.
+- Bank authorization is server-side only (`bank_sessions`, `BANK_SESSION_TTL_MINUTES`, default 15). The OTP is the static development code in `BANK_OTP_CODE` (default `123456`) and is compared in Python.
+- Tests: `python -m pytest tests` from `backend/`; they use fakes + `InMemorySaver` and never call Groq or MongoDB.
 
 ### Considerations
 - So far there ar no image files, and document files do not contain images.

@@ -1,8 +1,7 @@
 """MongoDB Atlas access layer.
 
 A single client is shared by the whole process. Collections used:
-  - users          : user accounts
-  - sessions       : auth sessions (24hr expiry)
+  - users          : the implicit owner account (there is no login)
   - files          : one document per ingested file (scoped by user_id)
   - chunks         : text chunks + embeddings (scoped by user_id, served by the
                      Atlas vector index with a `user_id` pre-filter)
@@ -11,6 +10,10 @@ A single client is shared by the whole process. Collections used:
                      stored encrypted)
   - transactions   : the user's bank transactions (scoped by user_id, linked to
                      a bank account via account_id)
+  - debit_cards    : one debit card per bank account (blocked, never deleted)
+  - chequebook_requests : chequebook orders (idempotent per user + key)
+  - bank_sessions  : conversation-scoped bank authorization (15 min TTL)
+  - workflow_checkpoints / workflow_writes : LangGraph checkpoints (per thread)
 """
 
 from __future__ import annotations
@@ -46,10 +49,6 @@ def users_collection() -> Collection:
     return get_db()["users"]
 
 
-def sessions_collection() -> Collection:
-    return get_db()["sessions"]
-
-
 def files_collection() -> Collection:
     return get_db()["files"]
 
@@ -68,6 +67,18 @@ def bank_accounts_collection() -> Collection:
 
 def transactions_collection() -> Collection:
     return get_db()["transactions"]
+
+
+def debit_cards_collection() -> Collection:
+    return get_db()["debit_cards"]
+
+
+def chequebook_requests_collection() -> Collection:
+    return get_db()["chequebook_requests"]
+
+
+def bank_sessions_collection() -> Collection:
+    return get_db()["bank_sessions"]
 
 
 def ping() -> bool:
@@ -111,12 +122,6 @@ def _ensure_index(
 def ensure_indexes() -> None:
     """Create regular (non-vector) indexes; failures are logged, never fatal."""
     _ensure_index(users_collection(), [("username", 1)], unique=True)
-    _ensure_index(sessions_collection(), [("token", 1)], unique=True)
-    # Sessions expire 24h after sign-in (MongoDB TTL index).
-    try:
-        sessions_collection().create_index([("expires_at", 1)], expireAfterSeconds=0)
-    except Exception as exc:  # pragma: no cover - depends on cluster state
-        print(f"[mongo] session TTL index skipped: {exc}")
     # Files are unique per user (the same name can exist for two users).
     _ensure_index(files_collection(), [("user_id", 1)])
     _ensure_index(
@@ -162,6 +167,37 @@ def ensure_indexes() -> None:
         [("user_id", 1), ("posted_at", -1)],
         name="user_posted_at",
     )
+
+    # --- bank workflow ---------------------------------------------------
+    # One debit card per account (blocking is an update, never a delete).
+    _ensure_index(
+        debit_cards_collection(),
+        [("account_id", 1)],
+        unique=True,
+        name="account_card_unique",
+    )
+    _ensure_index(debit_cards_collection(), [("user_id", 1)])
+    # A retried request must not create a second chequebook order.
+    _ensure_index(
+        chequebook_requests_collection(),
+        [("user_id", 1), ("idempotency_key", 1)],
+        unique=True,
+        name="chequebook_idempotency",
+    )
+    _ensure_index(chequebook_requests_collection(), [("user_id", 1)])
+    # Conversation-scoped authorization sessions (server-side, 15 min).
+    _ensure_index(
+        bank_sessions_collection(),
+        [("conversation_id", 1)],
+        unique=True,
+        name="conversation_session_unique",
+    )
+    try:
+        bank_sessions_collection().create_index(
+            [("expires_at", 1)], expireAfterSeconds=0
+        )
+    except Exception as exc:  # pragma: no cover - depends on cluster state
+        print(f"[mongo] bank session TTL index skipped: {exc}")
 
 
 def _index_dimensions(index: dict) -> int | None:

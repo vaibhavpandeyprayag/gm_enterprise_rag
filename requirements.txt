@@ -22,3 +22,5 @@ openpyxl
 requests
 beautifulsoup4
 playwright
+# Cross-encoder reranking of retrieved chunks
+sentence-transformers

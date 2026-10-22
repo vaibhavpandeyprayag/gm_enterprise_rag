@@ -185,16 +185,19 @@ def rephrase_query(
     original = (question or "").strip()
     if not original:
         return original
+    print("Crossed #1 ================", "\n")
 
     settings = settings or get_settings()
     if not settings.query_rephrasing_enabled:
         return original
+    print("Crossed #2 ================", "\n")
     # Without history there is nothing to resolve a reference against.
     if not history:
         return original
+    print("Crossed #3 ================", "\n")
     if not _needs_rephrasing(original):
         return original
-
+    print("Crossed #4 ================", "\n")
     try:
         rewritten = _rewrite(original, history, settings)
     except Exception as exc:  # network/LLM/provider failure -> keep the original
@@ -204,12 +207,16 @@ def rephrase_query(
     # Reject unusable output and fall back to the original question.
     if not rewritten or len(rewritten) > MAX_REWRITTEN_QUERY_CHARS:
         return original
+    print("Crossed #5 ================", "\n")
     if rewritten.lower() in _EMPTY_RESULTS:
         return original
+    print("Crossed #6 ================", "\n")
     if _NO_REWRITE_NEEDED.search(rewritten):
         return original
+    print("Crossed #7 ================", "\n")
     if rewritten.lower() == original.lower():
         return original
+    print("Crossed #8 ================", "\n")
 
     print(f"[rephrase] {original!r} -> {rewritten!r}")
     return rewritten

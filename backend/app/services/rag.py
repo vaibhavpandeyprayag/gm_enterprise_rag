@@ -1,7 +1,8 @@
-"""RAG pipeline: retrieve relevant chunks -> prompt -> LLM answer -> citations.
+"""RAG pipeline: decompose -> retrieve -> rerank -> prompt -> LLM answer.
 
-The assistant answers only from the ingested sources. One LLM call per turn,
-plus an optional query-rephrasing call for context-dependent follow-ups.
+The assistant answers only from the ingested sources. Multi-part questions are
+split into standalone subqueries, each subquery is retrieved and reranked, and
+the deduplicated chunks are answered against the original question.
 """
 
 from __future__ import annotations
@@ -16,7 +17,9 @@ from app.config import get_settings
 from app.prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 from app.services.history import history_text
 from app.services.llm import content_to_text, get_llm
+from app.services.query_decomposition import decompose_query
 from app.services.query_rewriter import rephrase_query
+from app.services.reranker import rerank
 from app.services.vectorstore import similarity_search
 
 
@@ -26,8 +29,8 @@ class RagResult:
 
     answer: str
     sources: list[dict[str, Any]] = field(default_factory=list)
-    # The standalone query that was used for the retrieval (equal to the
-    # original question when no rephrasing was needed).
+    # The standalone query (or "; "-joined subqueries) actually used for the
+    # retrieval; equal to the original question when nothing was rewritten.
     rephrased_query: str = ""
 
 
@@ -136,23 +139,60 @@ def _add_source(
     return len(block)
 
 
-def _retrieve(
-    question: str, settings: Any, user_id: str
+def _chunk_key(document: Any) -> tuple:
+    """Identity of a chunk (the same chunk can come back for several subqueries)."""
+    metadata = document.metadata or {}
+    identifier = metadata.get("_id")
+    if identifier is not None:
+        return ("id", str(identifier))
+    return ("content", metadata.get("source"), document.page_content)
+
+
+def _select_documents(
+    queries: list[str], settings: Any, user_id: str
+) -> list[Any]:
+    """Retrieve and rerank each subquery, then deduplicate the chunks."""
+    selected: list[Any] = []
+    seen: set[tuple] = set()
+
+    for query in queries:
+        try:
+            hits = similarity_search(
+                query, k=settings.retrieval_top_k, user_id=user_id
+            )
+        except Exception as exc:
+            print(f"[rag] vector search failed for {query!r}: {exc}")
+            continue
+
+        candidates = [
+            document
+            for document, score in hits
+            if score >= settings.retrieval_min_score
+        ]
+        if settings.rerank_enabled:
+            chosen = rerank(query, candidates, settings.rerank_top_n)
+        else:
+            chosen = candidates[: settings.rerank_top_n]
+
+        for document in chosen:
+            key = _chunk_key(document)
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(document)
+
+    return selected
+
+
+def _build_context(
+    documents: list[Any], settings: Any
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Top-k most similar chunks across the user's own ingested sources."""
+    """Number the selected chunks and cap the context size."""
     sources: list[dict[str, Any]] = []
     context_parts: list[str] = []
     context_chars = 0
 
-    try:
-        hits = similarity_search(question, k=settings.retrieval_top_k, user_id=user_id)
-    except Exception as exc:
-        print(f"[rag] vector search failed: {exc}")
-        hits = []
-
-    for document, score in hits:
-        if score < settings.retrieval_min_score:
-            continue
+    for document in documents:
         if context_chars >= settings.max_context_chars:
             break
         context_chars += _add_source(sources, context_parts, document)
@@ -164,19 +204,32 @@ def answer_question(question: str, history: list[dict], user_id: str) -> RagResu
     """Answer `question` grounded in the sources the user has ingested."""
     settings = get_settings()
 
-    # ---- 1. Make the query standalone -------------------------------------
-    # A context-dependent follow-up ("what about its pricing?") is rewritten
-    # into a self-contained query; a clear question is passed through as-is.
-    # On any failure the original question is used.
-    
-    search_query = rephrase_query(question, history, settings)
-    
+    # ---- 1. Split the question into standalone subqueries -----------------
+    subqueries = decompose_query(question, history, settings)
+    # print("===============================", "\n")
+    # print("subqueries >>", subqueries, "\n")
+    # ---- 2. Rephrase each subquery if needed ------------------------------
+    # The existing rephraser decides: a standalone subquery is passed through
+    # unchanged, and an LLM failure falls back to the subquery itself.
+    search_queries: list[str] = []
+    seen_queries: set[str] = set()
+    for subquery in subqueries:
+        query = rephrase_query(subquery, history, settings)
+        if query.casefold() in seen_queries:
+            continue
+        seen_queries.add(query.casefold())
+        search_queries.append(query)
 
-    # ---- 2. Retrieve the most relevant chunks -----------------------------
-    sources, context_parts = _retrieve(search_query, settings, user_id)
+    # ---- 3. Retrieve + rerank per subquery, deduplicate -------------------
+    # print("===============================", "\n")
+    # print("search_queries >>", search_queries, "\n")
+    documents = _select_documents(search_queries, settings, user_id)
+
+    # ---- 4. Number the combined context -----------------------------------
+    sources, context_parts = _build_context(documents, settings)
     context = "\n\n".join(context_parts) or "(no matching documents found)"
 
-    # ---- 3. Prompt assembly -----------------------------------------------
+    # ---- 5. Prompt assembly (original question + combined context) --------
     user_prompt = USER_PROMPT_TEMPLATE.format(
         context=context,
         history=history_text(history, settings.max_history_messages),
@@ -187,7 +240,7 @@ def answer_question(question: str, history: list[dict], user_id: str) -> RagResu
         HumanMessage(content=user_prompt),
     ]
     # print("user_prompt >>", user_prompt)
-    # ---- 4. LLM generation ------------------------------------------------
+    # ---- 6. LLM generation ------------------------------------------------
     response = get_llm().invoke(messages)
     answer = _content_to_text(response.content).strip()
 
@@ -198,10 +251,10 @@ def answer_question(question: str, history: list[dict], user_id: str) -> RagResu
     # print("==========================")
     # print("context_parts >>", context_parts)
     # print("==========================")
-    # ---- 5. Align sources with the citations the answer actually uses ----
+    # ---- 7. Align sources with the citations the answer actually uses ----
     final_sources, answer = _cited_sources(answer, sources)
     return RagResult(
         answer=answer,
         sources=final_sources,
-        rephrased_query=search_query,
+        rephrased_query="; ".join(search_queries),
     )

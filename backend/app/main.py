@@ -16,12 +16,15 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api import auth, banking, chat, conversations, files
 from app.config import FRONTEND_DIST, get_settings
-from app.services import mongo
+from app.services import mongo, reranker
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Startup: connect to Atlas, ensure regular + vector indexes."""
+    """Startup: load the reranker once, connect to Atlas, ensure indexes."""
+    # The cross-encoder is expensive to load - do it once, before serving
+    # requests. A failure is tolerated: retrieval falls back to vector order.
+    reranker.warm_up()
     ok = mongo.ping()
     print(f"[startup] MongoDB ping: {'ok' if ok else 'FAILED (check MONGODB_URI/network)'}")
     if ok:

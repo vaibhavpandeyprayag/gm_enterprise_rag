@@ -84,6 +84,14 @@ class Settings:
     query_rephrasing_enabled: bool
     query_rephrase_history_messages: int
 
+    # Query decomposition + cross-encoder reranking
+    query_decomposition_enabled: bool
+    decomposition_history_messages: int
+    max_subqueries: int
+    rerank_enabled: bool
+    rerank_top_n: int
+    reranker_model: str
+
     # URL ingestion (web pages are rendered with Playwright and indexed like documents)
     url_fetch_timeout_seconds: int
     url_render_timeout_ms: int
@@ -134,7 +142,7 @@ def get_settings() -> Settings:
         jina_base_url=_env("JINA_BASE_URL", "https://api.jina.ai/v1"),
         jina_model=_env("JINA_MODEL", "jina-embeddings-v3"),
         embedding_dim=_env_int("JINA_EMBEDDING_DIM", 1024),
-        retrieval_top_k=_env_int("RETRIEVAL_TOP_K", 6),
+        retrieval_top_k=_env_int("RETRIEVAL_TOP_K", 5),
         retrieval_min_score=float(os.getenv("RETRIEVAL_MIN_SCORE", "0.30")),
         max_history_messages=_env_int("MAX_HISTORY_MESSAGES", 10),
         max_context_chars=_env_int("MAX_CONTEXT_CHARS", 12000),
@@ -142,6 +150,17 @@ def get_settings() -> Settings:
         query_rephrasing_enabled=_env_bool("QUERY_REPHRASING_ENABLED", True),
         query_rephrase_history_messages=_env_int(
             "QUERY_REPHRASE_HISTORY_MESSAGES", 6
+        ),
+        # --- query decomposition + reranking ---
+        query_decomposition_enabled=_env_bool("QUERY_DECOMPOSITION_ENABLED", True),
+        decomposition_history_messages=_env_int(
+            "DECOMPOSITION_HISTORY_MESSAGES", 6
+        ),
+        max_subqueries=_env_int("MAX_SUBQUERIES", 5),
+        rerank_enabled=_env_bool("RERANK_ENABLED", True),
+        rerank_top_n=_env_int("RERANK_TOP_N", 3),
+        reranker_model=_env(
+            "RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
         ),
         url_fetch_timeout_seconds=_env_int("URL_FETCH_TIMEOUT_SECONDS", 15),
         url_render_timeout_ms=_env_int("URL_RENDER_TIMEOUT_MS", 30000),

@@ -115,3 +115,39 @@ USER QUESTION
 STANDALONE QUERY
 ================
 """
+
+# Query decomposition: split a question into standalone retrieval subqueries.
+# A single request must stay a single subquery.
+QUERY_DECOMPOSE_SYSTEM_PROMPT = """\
+You break a user's question into the minimal set of standalone search queries
+("subqueries") needed to answer it from a document-retrieval system.
+
+Rules (never break these):
+1. Output ONLY a JSON array of strings, for example:
+   ["first subquery", "second subquery"]
+   No explanation, no preamble, no markdown, no code fences.
+2. If the question is a single request, return an array with exactly ONE
+   subquery. Never invent extra questions.
+3. Split only when the question asks for several distinct things that need
+   separate searches (e.g. "compare X and Y", "what were the revenue and the
+   headcount in 2023?").
+4. Every subquery must be standalone and self-contained: resolve pronouns and
+   references ("it", "that plan", "the second one") using the chat history.
+5. Preserve the user's original intent, wording and language. Never answer the
+   question and never add facts that are not in the question or the history.
+6. Return at most {max_subqueries} subqueries.
+"""
+
+# User message for the decomposition step: history + question, no sources.
+QUERY_DECOMPOSE_USER_PROMPT = """\
+CHAT HISTORY (most recent last)
+===============================
+{history}
+
+USER QUESTION
+=============
+{question}
+
+SUBQUERIES (JSON array)
+=======================
+"""

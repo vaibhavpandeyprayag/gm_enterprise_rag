@@ -1,0 +1,35 @@
+METROVALE METRO — SAFETY AND MAINTENANCE HANDBOOK
+Domain: Urban public transportation | Reference period: FY 2025–26
+
+1. PREVENTIVE MAINTENANCE
+Train inspections occur before the first scheduled departure each operating day. A standard inspection covers brakes,
+door interlocks, onboard communication, lighting, and emergency equipment. A train with a failed brake test must not
+enter passenger service. Non-critical defects must be logged before the end of the shift and assigned a maintenance
+priority.
+
+2. TRACK AND SIGNALING
+Track patrols are conducted every 7 days. A detected track defect is classified as critical, major, or minor by the
+engineering controller. Critical defects require immediate protection of the affected section and notification to the
+Network Control Centre. Signal-system backups are tested on the first Sunday of each month between 00:30 and 03:30,
+when passenger service is closed.
+
+3. INCIDENT RESPONSE
+For smoke, fire, or suspected electrical arcing, staff must alert the control centre immediately, keep passengers away
+from the affected area, and follow the station evacuation plan. Staff must not re-energize equipment until authorized
+by the electrical controller. A medical incident should be reported with the station, platform, time, and assistance
+requested; personal medical details should be limited to what responders need.
+
+4. ELEVATOR AND ACCESSIBILITY EQUIPMENT
+Elevators receive a visual inspection daily and a technical inspection every 30 days. A safety-critical elevator defect
+requires the elevator to be taken out of service, signage to be placed at both entrances, and an accessible alternative
+route to be communicated. The target repair time is 4 hours, but safety clearance is required before reopening.
+
+5. PERFORMANCE INDICATORS
+The annual maintenance target is 98% completion of planned preventive tasks. The target for repeat failures within
+30 days is below 3%. In FY 2025–26, planned preventive maintenance completion was 96.5%, and repeat failures were
+4.2%. These results indicate a need to improve work-order closure and root-cause analysis.
+
+6. DOCUMENT CONTROL
+The Maintenance Manager reviews this handbook every 6 months. Proposed revisions are recorded with a revision date,
+owner, and summary of changes. This fictional handbook is a sample dataset for RAG testing, not an operational safety
+instruction.

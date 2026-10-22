@@ -1,0 +1,40 @@
+# General Purpose RAG
+
+This is a general purpose RAG application/chatbot that can ingest multiple files of various types (and web page URLs) and answers queries based on the data in those sources.
+
+### Types of files:
+- PDF
+- Docs
+- txt
+- markdown
+- csv
+- excel
+- ppt
+
+### Requirements
+- There will be a frontend UI that looks similar to ChatGPT UI, should be able to upload files, and maintain multiple conversations/chats.
+- The frontend can be in vite + react
+- Answers are based only on the ingested documents and URLs (no live web search/scraping at query time).
+- Web URLs can be added as a knowledge source; the page is rendered with Playwright (headless Chromium) so JavaScript-built content is captured, cleaned with BeautifulSoup, chunked, and indexed like a document.
+- MongoDB Atlas is the database used for saving all things - chunks, embeddings, conversations, etc.
+- Use langchain wherever can be useful.
+- Use appropriate splitting technique based upon the type of data (text/table/etc) - use same technique if no special treatment is required.
+- Use Groq for LLM (openai/gpt-oss-120b)
+- Groq API key is given in env file, but do not call LLM for test. I will test when code is ready.
+- For embedding, use Jina (jina-embeddings-v3, size=1024)
+- .venv is virtual environment used to install packages for this project.
+- use fastapi to build suitable api endpoints that will be hit from frontend.
+- Use proper system/user prompts.
+- Keep guard-rails in prompts.
+- Maintain modular and configurable style of coding.
+- Give comments wherever necessary.
+
+### Authentication & multi-tenancy
+- Users sign in with a username and password (bcrypt-hashed); the RAG page opens only after a successful sign-in.
+- The session is maintained in an HttpOnly cookie backed by a `sessions` collection in MongoDB Atlas; it expires **24 hours** after sign-in, and the user is logged out automatically.
+- Every record (`files`, `chunks`, `conversations`) carries a `user_id`; all queries and the vector search are filtered by it, so users never see each other's data.
+- The Atlas Vector Search index declares `user_id` as a *filter* field - retrieval uses a `pre_filter` on `user_id`.
+
+### Considerations
+- So far there ar no image files, and document files do not contain images.
+- Documents ingested before the multi-user feature have no `user_id`; assign them to an account with `python -m scripts.claim_legacy --username <name>` (run from `backend/`).

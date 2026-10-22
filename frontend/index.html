@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="GenRAG - chat with your documents and the web" />
+    <title>GenRAG</title>
+    <script>
+      // Apply the stored theme before the first paint (light is the default).
+      (function () {
+        var theme = 'light';
+        try {
+          if (localStorage.getItem('genrag-theme') === 'dark') theme = 'dark';
+        } catch (e) {
+          /* localStorage blocked - keep the default */
+        }
+        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

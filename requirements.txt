@@ -1,0 +1,24 @@
+# Backend (FastAPI + LangChain + MongoDB)
+fastapi
+uvicorn
+python-multipart
+python-dotenv
+langchain
+langchain-core
+langchain-text-splitters
+langchain-openai
+langchain-mongodb
+pymongo
+bcrypt
+# Encrypting sensitive banking fields (account / routing numbers)
+cryptography
+# Document loaders / splitters (type-aware ingestion)
+pymupdf
+python-docx
+python-pptx
+pandas
+openpyxl
+# URL ingestion: render JS-heavy pages (Playwright) then clean with BeautifulSoup
+requests
+beautifulsoup4
+playwright

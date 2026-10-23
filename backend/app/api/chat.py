@@ -82,9 +82,13 @@ def chat(
             history=history,
         )
     except Exception as exc:
+        print(f"[chat] request failed: {exc}")
         raise HTTPException(
             status_code=502,
-            detail=f"LLM/provider error: {exc}",
+            detail=(
+                "I couldn't process that message right now. Please try again "
+                "in a moment."
+            ),
         ) from exc
 
     # ---- Persist both turns ---------------------------------------------

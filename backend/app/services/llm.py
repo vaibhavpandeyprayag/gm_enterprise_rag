@@ -20,8 +20,8 @@ def get_llm() -> ChatOpenAI:
         model=settings.groq_model,
         base_url=settings.groq_base_url,
         api_key=settings.groq_api_key,
-        # temperature=0, 
-        temperature=0.2,  # low temp -> grounded, factual answers
+        temperature=0, 
+        # temperature=0.2, # low temp -> grounded, factual answers
         timeout=120,
         max_retries=2,
     )

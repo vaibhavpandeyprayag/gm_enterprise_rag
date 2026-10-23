@@ -52,6 +52,16 @@ _CITATION_PATTERN = re.compile(r"[\[【](\d{1,2})[\]】]")
 
 FALLBACK_SOURCE_COUNT = 3
 
+# User-facing fallbacks when a pipeline step fails before the model can answer.
+RETRIEVAL_UNAVAILABLE_ANSWER = (
+    "I couldn't search your documents just now, so I wasn't able to check your "
+    "files. Please try again in a moment."
+)
+GENERATION_UNAVAILABLE_ANSWER = (
+    "I'm sorry - I couldn't put together an answer just now. Please try again "
+    "in a moment."
+)
+
 # Phrases that mean "the documents had nothing useful" - in that case no source
 # should be shown (otherwise a refusal looks like it was grounded in a file).
 _REFUSAL_MARKERS = (
@@ -59,8 +69,14 @@ _REFUSAL_MARKERS = (
     "couldn't find",
     "cannot find",
     "can't find",
+    "unable to find",
+    "unable to answer",
     "not in the available sources",
     "no matching documents",
+    "do not have any information",
+    "don't have any information",
+    "no information about",
+    "not mentioned in the available sources",
 )
 
 
@@ -80,7 +96,7 @@ def _cited_sources(
     gaps, no unused entries). If the model cites nothing, the first few
     retrieved sources are shown - and the answer's numbers, if any, remapped.
 
-    A refusal ("I could not find that...") returns no sources.
+    A refusal ("I couldn't find anything about that...") returns no sources.
     """
     if _is_refusal(answer):
         return [], answer
@@ -150,10 +166,16 @@ def _chunk_key(document: Any) -> tuple:
 
 def _select_documents(
     queries: list[str], settings: Any, user_id: str
-) -> list[Any]:
-    """Retrieve and rerank each subquery, then deduplicate the chunks."""
+) -> tuple[list[Any], bool]:
+    """Retrieve and rerank each subquery, then deduplicate the chunks.
+
+    Also reports whether *every* retrieval attempt failed, so the caller can
+    return a clear "index unavailable" message instead of a misleading
+    "nothing found in your documents" answer.
+    """
     selected: list[Any] = []
     seen: set[tuple] = set()
+    failures = 0
 
     for query in queries:
         try:
@@ -161,6 +183,7 @@ def _select_documents(
                 query, k=settings.retrieval_top_k, user_id=user_id
             )
         except Exception as exc:
+            failures += 1
             print(f"[rag] vector search failed for {query!r}: {exc}")
             continue
 
@@ -181,7 +204,8 @@ def _select_documents(
             seen.add(key)
             selected.append(document)
 
-    return selected
+    all_failed = bool(queries) and failures == len(queries)
+    return selected, all_failed
 
 
 def _build_context(
@@ -223,7 +247,16 @@ def answer_question(question: str, history: list[dict], user_id: str) -> RagResu
     # ---- 3. Retrieve + rerank per subquery, deduplicate -------------------
     # print("===============================", "\n")
     # print("search_queries >>", search_queries, "\n")
-    documents = _select_documents(search_queries, settings, user_id)
+    documents, retrieval_failed = _select_documents(
+        search_queries, settings, user_id
+    )
+    if retrieval_failed:
+        print("[rag] every retrieval attempt failed; returning an unavailable notice")
+        return RagResult(
+            answer=RETRIEVAL_UNAVAILABLE_ANSWER,
+            sources=[],
+            rephrased_query="; ".join(search_queries),
+        )
 
     # ---- 4. Number the combined context -----------------------------------
     sources, context_parts = _build_context(documents, settings)
@@ -241,8 +274,22 @@ def answer_question(question: str, history: list[dict], user_id: str) -> RagResu
     ]
     # print("user_prompt >>", user_prompt)
     # ---- 6. LLM generation ------------------------------------------------
-    response = get_llm().invoke(messages)
-    answer = _content_to_text(response.content).strip()
+    # Provider failures and empty replies return a friendly fallback answer
+    # instead of surfacing a raw 5xx error to the chat UI.
+    try:
+        response = get_llm().invoke(messages)
+        answer = _content_to_text(response.content).strip()
+    except Exception as exc:
+        print(f"[rag] answer generation failed: {exc}")
+        answer = ""
+
+    if not answer:
+        print("[rag] no answer generated; returning the friendly fallback")
+        return RagResult(
+            answer=GENERATION_UNAVAILABLE_ANSWER,
+            sources=[],
+            rephrased_query="; ".join(search_queries),
+        )
 
     # print("==========================")
     # print("answer >>", answer)

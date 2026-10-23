@@ -45,16 +45,17 @@ _CANCEL_WORDS = {
 
 AUTH_EMAIL_PROMPT = (
     "Bank operations need a quick identity check first.\n\n"
-    "What is the email registered on your account?"
+    "What is the email registered with your bank? You can also ask a question "
+    "about your documents at any time."
 )
 AUTH_EMAIL_RETRY = (
-    "I couldn't find an account with that email. "
-    "Please check it and enter the registered email again."
+    "I couldn't find an account with that email. Please check the address and "
+    "send the email registered with your bank."
 )
 AUTH_OTP_PROMPT = "Thanks. Enter the 6-digit verification code sent to {email}."
 SESSION_EXPIRED_PROMPT = (
-    "Your secure bank session has expired. Please enter your registered email "
-    "again to continue with the pending request."
+    "Your secure bank session has expired, so nothing was submitted. To continue "
+    "the pending request, please enter your registered email again."
 )
 
 
@@ -249,7 +250,7 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
     def auth_email(state: WorkflowState) -> dict[str, Any]:
         question = state.get("question", "")
         if _is_cancel(question):
-            return _cancelled("Okay, I've cancelled that bank request.")
+            return _cancelled("Okay, I've cancelled that bank request. Nothing was changed.")
 
         email = extract_email(question)
         if not email:
@@ -282,7 +283,7 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
     def auth_otp(state: WorkflowState) -> dict[str, Any]:
         question = state.get("question", "")
         if _is_cancel(question):
-            return _cancelled("Okay, I've cancelled that bank request.")
+            return _cancelled("Okay, I've cancelled that bank request. Nothing was changed.")
 
         match = _OTP_PATTERN.search(question)
         if not match:
@@ -290,7 +291,10 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
             if is_new_request("the 6-digit verification code", state):
                 return _abandoned_state()
             return {
-                "response": "Please enter the 6-digit verification code.",
+                "response": (
+                    "I didn't see a 6-digit code in that message. Please send "
+                    "the 6-digit verification code we're waiting for."
+                ),
                 "status": "needs_auth",
                 "auth_stage": "otp",
             }
@@ -300,7 +304,10 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
         if match.group(1) != deps.otp_code:
             attempts = int(state.get("otp_attempts", 0)) + 1
             return {
-                "response": "That code is incorrect. Please try again.",
+                "response": (
+                    "That code is incorrect. Please check the 6-digit code and "
+                    "try again."
+                ),
                 "status": "needs_auth",
                 "auth_stage": "otp",
                 "otp_attempts": attempts,
@@ -309,7 +316,10 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
         verified_user_id = state.get("auth_user_id")
         if not verified_user_id:
             return {
-                "response": "Please enter your registered email again.",
+                "response": (
+                    "I lost track of the account we were verifying. Please "
+                    "enter your registered email again."
+                ),
                 "status": "needs_auth",
                 "auth_stage": "email",
             }
@@ -366,8 +376,9 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
         task = TASKS.get(state.get("operation") or "")
         if task is None:
             return {
-                "response": "I couldn't determine which bank operation to run. "
-                "Please tell me what you'd like to do.",
+                "response": "I'm not sure which bank task you meant. I can check "
+                "your account balance, show your recent transactions, request a "
+                "chequebook, or block your debit card. Which one would you like?",
                 "status": "error",
                 **_cleared_operation(),
             }
@@ -415,7 +426,11 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
         )
         if field is None:
             return {
-                "response": "Something went wrong with that request. Please start again.",
+                "response": (
+                    "I'm sorry - I lost track of that request. Nothing was "
+                    "changed. Please start again by telling me what you'd like "
+                    "to do."
+                ),
                 "status": "error",
                 **_cleared_operation(),
             }
@@ -433,7 +448,7 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
             deps.settings,
         )
         if extraction.action == "cancel":
-            return _cancelled("Okay, I've cancelled that request.")
+            return _cancelled("Okay, I've cancelled that request. Nothing was changed.")
 
         try:
             value = field.parse(extraction.value)
@@ -471,7 +486,7 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
                 "status": "ok",
             }
         if decision == "cancel":
-            return _cancelled("Okay, I've cancelled that request.")
+            return _cancelled("Okay, I've cancelled that request. Nothing was changed.")
 
         # The reply was not a clear yes/no - it may be a document question.
         if is_new_request(
@@ -479,7 +494,10 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
         ):
             return _abandoned_state()
         return {
-            "response": "Please reply **yes** to confirm or **no** to cancel.",
+            "response": (
+                "I just need a clear yes or no: reply **yes** to confirm or "
+                "**no** to cancel."
+            ),
             "status": "needs_confirmation",
             "confirmation_pending": True,
             "confirmed": False,
@@ -496,7 +514,11 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
         actor = state.get("verified_user_id") or ""
         if task is None or not actor:
             return {
-                "response": "I couldn't complete that request. Please try again.",
+                "response": (
+                    "I'm sorry - I couldn't finish that request because some "
+                    "details were missing. Nothing was changed. Please start "
+                    "again."
+                ),
                 "status": "error",
                 **_cleared_operation(),
             }
@@ -530,8 +552,8 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
         except Exception as exc:  # pragma: no cover - provider/database failure
             print(f"[workflow] {task.key} failed: {exc}")
             return {
-                "response": "Sorry, I couldn't complete that request right now. "
-                "Please try again later.",
+                "response": "I'm sorry - I ran into a problem while completing "
+                "that request. Please try again in a moment.",
                 "status": "error",
                 **_cleared_operation(),
             }

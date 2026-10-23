@@ -141,6 +141,8 @@ class Fakes:
         self.slot_value: str | None = None
         self.slot_action = "provide"
         self.confirmation = "confirm"
+        # Whether the latest message answers the paused prompt or changes topic.
+        self.pending_reply = "answer_pending"
         self.doc_answer = "Answer from your documents."
         self.users = {EMAIL: {"user_id": USER_ID, "username": "owner"}}
 
@@ -152,6 +154,9 @@ class Fakes:
             extract_field=self._extract_field,
             classify_confirmation=lambda question, history, settings: (
                 self.confirmation
+            ),
+            classify_pending_reply=lambda pending, question, history, settings: (
+                self.pending_reply
             ),
             answer_question=self._answer_question,
             find_user_by_email=lambda email: self.users.get(email),

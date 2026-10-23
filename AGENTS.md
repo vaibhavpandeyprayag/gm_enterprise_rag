@@ -38,6 +38,8 @@ This is a general purpose RAG application/chatbot that can ingest multiple files
 - Chat turns run through the LangGraph workflow in `backend/app/workflow/` (intent routing, auth, slot filling, confirmation, tools). Thread id = `conversation_id`; checkpoints live in `workflow_checkpoints` / `workflow_writes`.
 - Bank authorization is server-side only (`bank_sessions`, `BANK_SESSION_TTL_MINUTES`, default 15). The OTP is the static development code in `BANK_OTP_CODE` (default `123456`) and is compared in Python.
 - Tests: `python -m pytest tests` from `backend/`; they use fakes + `InMemorySaver` and never call Groq or MongoDB.
+- While a bank prompt is open (email, OTP, slot value, confirmation), a document question is routed to document Q&A instead and the pending bank request is reset (the 15-minute auth session is kept).
+- Every backend startup resets the demo banking data (`scripts/seed_demo_data.py`): users `vp5` (`vp5@xyz.com`) and `demo` (`demo@xyz.com`), one account each, sample transactions, active debit cards and chequebook requests. Their bank sessions and prior bank records are deleted first; other users are untouched.
 
 ### Considerations
 - So far there ar no image files, and document files do not contain images.

@@ -87,6 +87,35 @@ def _cancelled(message: str) -> dict[str, Any]:
     }
 
 
+def _abandoned_state() -> dict[str, Any]:
+    """Forget a pending bank flow so the current message can be routed fresh.
+
+    The server-side bank session (if one exists) is intentionally kept: only the
+    unfinished *request* is reset. Document Q&A never needs the session anyway.
+    """
+    return {
+        "abandoned": True,
+        "intent": None,
+        "operation": None,
+        "pending_operation": None,
+        "pending_action": None,
+        "auth_stage": None,
+        "auth_email": None,
+        "auth_user_id": None,
+        "verified_user_id": None,
+        "otp_attempts": 0,
+        "resume_to": None,
+        "collected": {},
+        "awaiting_field": None,
+        "confirmation_pending": False,
+        "confirmed": False,
+        "execution_key": None,
+        "sources": [],
+        "rephrased_query": "",
+        "status": "ok",
+    }
+
+
 def _cleared_operation() -> dict[str, Any]:
     """Post-execution state: no pending request, no temporary authorization."""
     return {
@@ -123,6 +152,23 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
             return "confirm_input"
         return "classify"
 
+    def is_new_request(pending: str, state: WorkflowState) -> bool:
+        """True when the message changes topic instead of answering `pending`.
+
+        Used by every paused bank step, so a document question can interrupt an
+        email / OTP / slot / confirmation prompt. The caller then clears the
+        pending request and sends the message back through intent routing.
+        """
+        return (
+            deps.classify_pending_reply(
+                pending,
+                state.get("question", ""),
+                state.get("history", []),
+                deps.settings,
+            )
+            == "new_request"
+        )
+
     # ---- intent routing --------------------------------------------------
     def classify(state: WorkflowState) -> dict[str, Any]:
         operation = deps.classify_intent(
@@ -134,6 +180,7 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
                 "operation": None,
                 "pending_operation": None,
                 "pending_action": None,
+                "abandoned": False,
                 "status": "ok",
                 "sources": [],
                 "rephrased_query": "",
@@ -152,6 +199,7 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
             "sources": [],
             "rephrased_query": "",
             "status": "ok",
+            "abandoned": False,
         }
 
     def after_classify(state: WorkflowState) -> str:
@@ -205,6 +253,9 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
 
         email = extract_email(question)
         if not email:
+            # No email in the message: it may be a document question instead.
+            if is_new_request("the email address registered on the account", state):
+                return _abandoned_state()
             return {
                 "response": AUTH_EMAIL_PROMPT,
                 "status": "needs_auth",
@@ -235,6 +286,9 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
 
         match = _OTP_PATTERN.search(question)
         if not match:
+            # No code in the message: it may be a document question instead.
+            if is_new_request("the 6-digit verification code", state):
+                return _abandoned_state()
             return {
                 "response": "Please enter the 6-digit verification code.",
                 "status": "needs_auth",
@@ -296,7 +350,12 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
             )
         return update
 
+    def after_auth_email(state: WorkflowState) -> str:
+        return "classify" if state.get("abandoned") else END
+
     def after_auth_otp(state: WorkflowState) -> str:
+        if state.get("abandoned"):
+            return "classify"
         # A rejected/missing code keeps auth_stage set: stop and ask again.
         if state.get("auth_stage") in {"email", "otp"}:
             return END
@@ -361,6 +420,12 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
                 **_cleared_operation(),
             }
 
+        # A document question (or any new request) abandons the pending slot
+        # instead of being forced into the field. Checked *before* extraction so
+        # an unrelated message can never accidentally validate as a value.
+        if is_new_request(field.question, state):
+            return _abandoned_state()
+
         extraction = deps.extract_field(
             field,
             state.get("question", ""),
@@ -388,6 +453,8 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
 
     # ---- confirmation ----------------------------------------------------
     def after_collect(state: WorkflowState) -> str:
+        if state.get("abandoned"):
+            return "classify"
         # Invalid input: keep the (error + question) reply and wait for the user.
         return END if state.get("awaiting_field") else "slots"
 
@@ -405,6 +472,12 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
             }
         if decision == "cancel":
             return _cancelled("Okay, I've cancelled that request.")
+
+        # The reply was not a clear yes/no - it may be a document question.
+        if is_new_request(
+            "Reply yes to confirm or no to cancel the pending bank request.", state
+        ):
+            return _abandoned_state()
         return {
             "response": "Please reply **yes** to confirm or **no** to cancel.",
             "status": "needs_confirmation",
@@ -413,6 +486,8 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
         }
 
     def after_confirm(state: WorkflowState) -> str:
+        if state.get("abandoned"):
+            return "classify"
         return "execute" if state.get("confirmed") else END
 
     # ---- tool execution --------------------------------------------------
@@ -501,14 +576,18 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
         after_authorize,
         {"slots": "slots", END: END},
     )
-    # Ask for the OTP and stop: the code arrives in the next user turn, where
-    # `entry` resumes at `auth_otp` (chaining here would consume the same
-    # message as the code).
-    builder.add_edge("auth_email", END)
+    # Normally ask for the OTP and stop: the code arrives in the next user turn,
+    # where `entry` resumes at `auth_otp`. If the user changed topic instead,
+    # `after_auth_email` sends the message back through `classify`.
+    builder.add_conditional_edges(
+        "auth_email",
+        after_auth_email,
+        {"classify": "classify", END: END},
+    )
     builder.add_conditional_edges(
         "auth_otp",
         after_auth_otp,
-        {"execute": "execute", "slots": "slots", END: END},
+        {"classify": "classify", "execute": "execute", "slots": "slots", END: END},
     )
     builder.add_conditional_edges(
         "slots",
@@ -518,12 +597,12 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
     builder.add_conditional_edges(
         "collect_input",
         after_collect,
-        {"slots": "slots", END: END},
+        {"classify": "classify", "slots": "slots", END: END},
     )
     builder.add_conditional_edges(
         "confirm_input",
         after_confirm,
-        {"execute": "execute", END: END},
+        {"classify": "classify", "execute": "execute", END: END},
     )
     builder.add_edge("execute", END)
 

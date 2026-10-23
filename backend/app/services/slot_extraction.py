@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field
 from app.prompts import (
     CONFIRMATION_SYSTEM_PROMPT,
     CONFIRMATION_USER_PROMPT,
+    PENDING_REPLY_SYSTEM_PROMPT,
+    PENDING_REPLY_USER_PROMPT,
     SLOT_EXTRACTION_SYSTEM_PROMPT,
     SLOT_EXTRACTION_USER_PROMPT,
 )
@@ -34,6 +36,46 @@ class SlotExtraction(BaseModel):
 
 class ConfirmationDecision(BaseModel):
     decision: Confirmation = "unclear"
+
+
+class PendingReplyDecision(BaseModel):
+    """Whether a message answers the current prompt or changes topic."""
+
+    action: Literal["answer_pending", "new_request"] = "answer_pending"
+
+
+def classify_pending_reply(
+    pending: str,
+    question: str,
+    history: list[dict[str, Any]],
+    settings: Any,
+) -> str:
+    """Return 'answer_pending' or 'new_request' for a paused bank flow.
+
+    This is what lets a document question interrupt an email/OTP/slot/
+    confirmation prompt: the pending request is abandoned and the message is
+    routed again from scratch. On errors we keep the pending flow (safe default).
+    """
+    llm = get_llm().with_structured_output(
+        PendingReplyDecision, method="function_calling"
+    )
+    prompt = PENDING_REPLY_USER_PROMPT.format(
+        history=history_text(history, settings.max_history_messages),
+        question=question,
+    )
+    try:
+        result = llm.invoke(
+            [
+                SystemMessage(
+                    content=PENDING_REPLY_SYSTEM_PROMPT.format(pending=pending)
+                ),
+                HumanMessage(content=prompt),
+            ]
+        )
+        return result.action
+    except Exception as exc:
+        print(f"[pending] classification failed ({exc}); keeping the pending flow")
+        return "answer_pending"
 
 
 def extract_field(

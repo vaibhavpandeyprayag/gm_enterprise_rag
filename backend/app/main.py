@@ -21,7 +21,7 @@ from app.services import mongo, reranker
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Startup: load the reranker once, connect to Atlas, ensure indexes."""
+    """Startup: reranker, Atlas, indexes, then refresh the sample bank data."""
     # The cross-encoder is expensive to load - do it once, before serving
     # requests. A failure is tolerated: retrieval falls back to vector order.
     reranker.warm_up()
@@ -30,6 +30,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if ok:
         mongo.ensure_indexes()
         mongo.ensure_vector_index()
+
+        # Always start from the same demo banking state (two users, one account
+        # each, sample transactions/cards/chequebook requests). Failures must
+        # never stop the API from serving - they are logged instead.
+        try:
+            from scripts.seed_demo_data import refresh_demo_data
+
+            refresh_demo_data()
+            print("[startup] sample bank data refreshed")
+        except Exception as exc:
+            print(f"[startup] sample bank data refresh failed: {exc}")
     yield
     mongo.get_client().close()
 

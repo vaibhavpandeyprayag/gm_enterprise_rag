@@ -1,4 +1,4 @@
-"""Seed two demo users with bank accounts, transactions and debit cards.
+"""Reset and seed two demo users with bank accounts, transactions and cards.
 
 Users (the bank-auth step matches these emails exactly):
     vp5   / vp5@xyz.com     (the configured implicit owner)
@@ -7,19 +7,21 @@ Users (the bank-auth step matches these emails exactly):
 The OTP is not stored per user: it is the shared development code in
 `BANK_OTP_CODE` (123456 by default).
 
-Runs are idempotent: an existing user/account is reused, transactions are only
-added when the account has none, and the chequebook request uses a fixed
-idempotency key. All banking data goes through the service layer so account
-numbers are encrypted and cards are created with the same rules as production.
+`refresh_demo_data()` is called on every application startup. It deletes the
+demo users' bank accounts, transactions, debit cards, chequebook requests and
+bank sessions and recreates the exact sample state, so the database always
+starts from the same demo data (cards active, balances/transactions reset,
+no leftover orders). Other users' banking data is left alone.
+
+All banking data goes through the service layer so account numbers are
+encrypted and cards are created with the same rules as production.
 
 Usage (from `backend/`):
     python -m scripts.seed_demo_data
-    python -m scripts.seed_demo_data --reset   # delete demo banking data first
 """
 
 from __future__ import annotations
 
-import argparse
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -187,46 +189,30 @@ def seed_chequebook(
     return not result.get("duplicate")
 
 
-def reset_demo_data() -> None:
-    """Remove banking data for the two demo users (users themselves are kept)."""
-    usernames = [item["username"] for item in DEMO_USERS]
-    users = list(mongo.users_collection().find({"username": {"$in": usernames}}))
-    user_ids = [user["user_id"] for user in users]
+def _reset_banking_data(user_ids: list[str]) -> None:
+    """Delete every banking record owned by the demo users (sessions included)."""
     if not user_ids:
         return
-
-    account_ids = [
-        doc["account_id"]
-        for doc in mongo.bank_accounts_collection().find(
-            {"user_id": {"$in": user_ids}}, {"account_id": 1}
-        )
-    ]
-    mongo.transactions_collection().delete_many({"account_id": {"$in": account_ids}})
-    mongo.debit_cards_collection().delete_many({"account_id": {"$in": account_ids}})
-    mongo.chequebook_requests_collection().delete_many({"user_id": {"$in": user_ids}})
-    mongo.bank_accounts_collection().delete_many({"user_id": {"$in": user_ids}})
-    print(f"Deleted banking data for {', '.join(usernames)}")
+    scope = {"user_id": {"$in": user_ids}}
+    mongo.transactions_collection().delete_many(scope)
+    mongo.debit_cards_collection().delete_many(scope)
+    mongo.chequebook_requests_collection().delete_many(scope)
+    mongo.bank_accounts_collection().delete_many(scope)
+    # Old authorizations must not survive the reset.
+    mongo.bank_sessions_collection().delete_many(scope)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Seed demo users and bank data.")
-    parser.add_argument(
-        "--reset",
-        action="store_true",
-        help="delete the demo users' banking data before seeding",
-    )
-    args = parser.parse_args()
+def refresh_demo_data() -> None:
+    """Reset the demo banking data and recreate the sample state.
 
-    if not mongo.ping():
-        print("MongoDB unreachable - check MONGODB_URI")
-        return 1
+    Called on every application startup, so cards become active again, balances
+    and transactions are restored, and test orders/sessions disappear. Only the
+    two demo users are touched.
+    """
+    users = [ensure_user(item["username"], item["email"]) for item in DEMO_USERS]
+    _reset_banking_data([user["user_id"] for user in users])
 
-    mongo.ensure_indexes()
-    if args.reset:
-        reset_demo_data()
-
-    for item in DEMO_USERS:
-        user = ensure_user(item["username"], item["email"])
+    for item, user in zip(DEMO_USERS, users):
         account = ensure_account(user, item["account"])
         added = seed_transactions(user, account, item["transactions"])
         card = bank_actions.ensure_debit_card(
@@ -236,18 +222,20 @@ def main() -> int:
         )
         created_request = seed_chequebook(user, account, item["chequebook"])
         print(
-            f"{item['username']} <{item['email']}>: "
+            f"[seed] {item['username']} <{item['email']}>: "
             f"{account['bank_name']} {account['account_number_masked']} "
             f"(balance {account['currency']} {account['balance']:,.2f}), "
             f"card {card['last4']} ({card['status']}), "
-            f"transactions +{added}, "
+            f"transactions {added}, "
             f"chequebook {'created' if created_request else 'kept'}"
         )
 
-    print("\nResult:")
+
+def _print_summary() -> None:
+    print("\nSample bank data:")
     for item in DEMO_USERS:
         user = mongo.users_collection().find_one({"username": item["username"]})
-        if user is None:  # pragma: no cover - created above
+        if user is None:  # pragma: no cover - created by refresh_demo_data
             continue
         uid = user["user_id"]
         print(
@@ -257,7 +245,17 @@ def main() -> int:
             f"{mongo.debit_cards_collection().count_documents({'user_id': uid})} card(s), "
             f"{mongo.chequebook_requests_collection().count_documents({'user_id': uid})} chequebook request(s)"
         )
-    print("\nBank OTP for both users: 123456 (BANK_OTP_CODE).")
+    print("Bank OTP for both users: 123456 (BANK_OTP_CODE).")
+
+
+def main() -> int:
+    if not mongo.ping():
+        print("MongoDB unreachable - check MONGODB_URI")
+        return 1
+
+    mongo.ensure_indexes()
+    refresh_demo_data()
+    _print_summary()
     return 0
 
 

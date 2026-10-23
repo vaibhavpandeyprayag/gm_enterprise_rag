@@ -14,7 +14,11 @@ from app.services import bank_auth, rag
 from app.services.bank_auth import BankSessionStore
 from app.services.bank_tools import BankTools
 from app.services.intent_router import classify_intent
-from app.services.slot_extraction import classify_confirmation, extract_field
+from app.services.slot_extraction import (
+    classify_confirmation,
+    classify_pending_reply,
+    extract_field,
+)
 
 
 @dataclass
@@ -24,6 +28,7 @@ class WorkflowDeps:
     classify_intent: Callable[..., str]
     extract_field: Callable[..., Any]
     classify_confirmation: Callable[..., str]
+    classify_pending_reply: Callable[..., str]
     answer_question: Callable[..., Any]
     find_user_by_email: Callable[[str], dict[str, Any] | None]
     otp_code: str
@@ -40,6 +45,7 @@ class WorkflowDeps:
             classify_intent=classify_intent,
             extract_field=extract_field,
             classify_confirmation=classify_confirmation,
+            classify_pending_reply=classify_pending_reply,
             answer_question=rag.answer_question,
             find_user_by_email=bank_auth.find_user_by_email,
             otp_code=settings.bank_otp_code,

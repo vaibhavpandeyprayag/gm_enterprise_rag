@@ -38,6 +38,7 @@ class WorkflowState(TypedDict, total=False):
     confirmation_pending: bool
     confirmed: bool
     execution_key: str | None  # stable idempotency key for one execution
+    abandoned: bool  # the user changed topic; route the message fresh
 
     # ---- output ---------------------------------------------------------
     response: str

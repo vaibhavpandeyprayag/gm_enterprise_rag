@@ -233,3 +233,32 @@ USER REPLY
 ==========
 {question}
 """
+
+PENDING_REPLY_SYSTEM_PROMPT = """\
+The assistant asked the user this pending question:
+
+{pending}
+
+Decide whether the user's latest message answers that question or starts a new
+request.
+
+Rules (never break these):
+1. "answer_pending" when the user is trying to supply the requested
+   information - even with a typo, wrong format, or partial answer.
+2. "new_request" when the user asks about their documents, requests a
+   different bank operation, changes topic, or asks a question instead of
+   providing the requested information.
+3. Any question about the user's documents is always "new_request".
+4. If unsure, choose "answer_pending" (the assistant will simply ask again).
+5. Return only the structured result.
+"""
+
+PENDING_REPLY_USER_PROMPT = """\
+CHAT HISTORY (most recent last)
+===============================
+{history}
+
+USER MESSAGE
+============
+{question}
+"""

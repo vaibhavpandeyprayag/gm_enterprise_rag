@@ -180,6 +180,74 @@ def test_expired_session_reauthenticates_and_resumes_same_request(graph, fakes):
     assert fakes.tools.calls[0]["execution_key"] == pending_key
 
 
+# ---- document questions can interrupt any bank prompt --------------------
+def test_document_question_at_email_prompt_abandons_bank_request(graph, fakes):
+    fakes.intent = "get_account_balance"
+    assert send(graph, "Show my balance")["status"] == "needs_auth"
+
+    fakes.intent = DOCUMENT_QA
+    fakes.pending_reply = "new_request"
+    result = send(graph, "What does my uploaded policy document say?")
+
+    assert result["status"] == "ok"
+    assert result["response"] == fakes.doc_answer
+    assert result["operation"] is None
+    assert result["pending_operation"] is None
+    assert result["auth_stage"] is None
+    assert fakes.sessions.sessions == {}
+    assert fakes.tools.calls == []
+
+
+def test_document_question_at_otp_prompt_abandons_bank_request(graph, fakes):
+    fakes.intent = "get_account_balance"
+    send(graph, "Show my balance")
+    assert send(graph, EMAIL)["auth_stage"] == "otp"
+
+    fakes.intent = DOCUMENT_QA
+    fakes.pending_reply = "new_request"
+    result = send(graph, "Summarise the employee handbook")
+
+    assert result["status"] == "ok"
+    assert result["response"] == fakes.doc_answer
+    assert result["auth_stage"] is None
+    assert fakes.sessions.sessions == {}  # no session was created
+    assert fakes.tools.calls == []
+
+
+def test_document_question_at_slot_prompt_abandons_bank_request(graph, fakes):
+    fakes.intent = "issue_chequebook"
+    send(graph, "Order a chequebook")
+    assert authenticate(graph)["status"] == "needs_input"
+
+    fakes.intent = DOCUMENT_QA
+    fakes.pending_reply = "new_request"
+    result = send(graph, "What does the PDF say about cheque books?")
+
+    assert result["status"] == "ok"
+    assert result["response"] == fakes.doc_answer
+    assert result["awaiting_field"] is None
+    assert result["collected"] == {}
+    assert result["operation"] is None
+    assert fakes.tools.calls == []
+
+
+def test_document_question_at_confirmation_abandons_bank_request(graph, fakes):
+    fakes.intent = "block_debit_card"
+    send(graph, "Block my debit card")
+    assert authenticate(graph)["status"] == "needs_confirmation"
+
+    fakes.confirmation = "unclear"  # a question is not a yes/no
+    fakes.intent = DOCUMENT_QA
+    fakes.pending_reply = "new_request"
+    result = send(graph, "What do my documents say about card blocking?")
+
+    assert result["status"] == "ok"
+    assert result["response"] == fakes.doc_answer
+    assert result["confirmation_pending"] is False
+    assert result["operation"] is None
+    assert fakes.tools.calls == []
+
+
 def test_real_tools_refuse_to_read_data_without_a_session(monkeypatch):
     from app.services import bank_tools, banking
     from app.services.bank_auth import SessionRequired

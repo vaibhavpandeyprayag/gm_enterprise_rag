@@ -140,6 +140,16 @@ def _cleared_operation() -> dict[str, Any]:
     }
 
 
+def _ask_for(fields: Any, errors: dict[str, str] | None = None) -> str:
+    """Compose the prompt for the still-missing fields (with validation errors)."""
+    errors = errors or {}
+    parts = []
+    for field in fields:
+        error = errors.get(field.name)
+        parts.append(f"{error} {field.question}" if error else field.question)
+    return "\n\n".join(parts)
+
+
 def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
     """Build and compile the workflow graph."""
 
@@ -245,7 +255,13 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
         }
 
     def after_authorize(state: WorkflowState) -> str:
-        return END if state.get("auth_stage") else "slots"
+        # A fresh bank request can carry the email in the same message (e.g.
+        # "Show my balance - my email is owner@example.com"). Reuse auth_email
+        # in this turn so the user is only asked for the OTP. Without an email,
+        # stop and wait for the reply to the email prompt.
+        if state.get("auth_stage") == "email":
+            return "auth_email" if extract_email(state.get("question", "")) else END
+        return "slots"
 
     def auth_email(state: WorkflowState) -> dict[str, Any]:
         question = state.get("question", "")
@@ -386,10 +402,16 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
         values = state.get("collected") or {}
         missing = missing_fields(task, values)
         if missing:
-            field = missing[0]
+            # First time (nothing collected yet): show everything the request
+            # needs, so the user can answer all fields in one message. Later,
+            # ask only for what is still missing.
+            if not values and task.requirements:
+                response = task.requirements
+            else:
+                response = _ask_for(missing)
             return {
-                "awaiting_field": field.name,
-                "response": field.question,
+                "awaiting_field": missing[0].name,
+                "response": response,
                 "status": "needs_input",
             }
 
@@ -419,12 +441,7 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
 
     def collect_input(state: WorkflowState) -> dict[str, Any]:
         task = TASKS.get(state.get("operation") or "")
-        field_name = state.get("awaiting_field") or ""
-        field = next(
-            (spec for spec in (task.fields if task else ()) if spec.name == field_name),
-            None,
-        )
-        if field is None:
+        if task is None:
             return {
                 "response": (
                     "I'm sorry - I lost track of that request. Nothing was "
@@ -435,31 +452,62 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
                 **_cleared_operation(),
             }
 
-        # A document question (or any new request) abandons the pending slot
-        # instead of being forced into the field. Checked *before* extraction so
+        if _is_cancel(state.get("question", "")):
+            return _cancelled(
+                "Okay, I've cancelled that request. Nothing was changed."
+            )
+
+        collected = dict(state.get("collected") or {})
+        missing = missing_fields(task, collected)
+        if not missing:
+            return {"awaiting_field": None, "status": "ok"}
+
+        # A document question (or any new request) abandons the pending slots
+        # instead of being forced into a field. Checked *before* extraction so
         # an unrelated message can never accidentally validate as a value.
-        if is_new_request(field.question, state):
+        pending = (
+            "the details needed for the pending " + task.title.lower() + ": "
+        )
+        pending += " ".join(field.question for field in missing)
+        if is_new_request(pending, state):
             return _abandoned_state()
 
-        extraction = deps.extract_field(
-            field,
-            state.get("question", ""),
-            state.get("history", []),
-            deps.settings,
-        )
-        if extraction.action == "cancel":
-            return _cancelled("Okay, I've cancelled that request. Nothing was changed.")
+        # One message may supply several fields ("50 leaves, home delivery").
+        # Try every missing field and keep the values that validate.
+        errors: dict[str, str] = {}
+        for field in missing:
+            extraction = deps.extract_field(
+                field,
+                state.get("question", ""),
+                state.get("history", []),
+                deps.settings,
+            )
+            if extraction.action == "cancel":
+                return _cancelled(
+                    "Okay, I've cancelled that request. Nothing was changed."
+                )
+            if extraction.value is None or not str(extraction.value).strip():
+                continue
+            try:
+                collected[field.name] = field.parse(extraction.value)
+            except InputError as exc:
+                errors[field.name] = str(exc)
 
-        try:
-            value = field.parse(extraction.value)
-        except InputError as exc:
+        still_missing = missing_fields(task, collected)
+        if still_missing:
+            if errors:
+                response = _ask_for(still_missing, errors)
+            elif not collected and task.requirements:
+                response = task.requirements
+            else:
+                response = _ask_for(still_missing)
             return {
-                "response": f"{exc} {field.question}",
+                "collected": collected,
+                "awaiting_field": still_missing[0].name,
+                "response": response,
                 "status": "needs_input",
-                "awaiting_field": field.name,
             }
 
-        collected = {**(state.get("collected") or {}), field.name: value}
         return {
             "collected": collected,
             "awaiting_field": None,
@@ -470,7 +518,10 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
     def after_collect(state: WorkflowState) -> str:
         if state.get("abandoned"):
             return "classify"
-        # Invalid input: keep the (error + question) reply and wait for the user.
+        # A cancellation or an internal error already has its final reply.
+        if state.get("status") in {"cancelled", "error"}:
+            return END
+        # Missing/invalid input: keep the (error + question) reply and wait.
         return END if state.get("awaiting_field") else "slots"
 
     def confirm_input(state: WorkflowState) -> dict[str, Any]:
@@ -596,7 +647,7 @@ def build_graph(deps: WorkflowDeps, checkpointer: Any = None) -> Any:
     builder.add_conditional_edges(
         "authorize",
         after_authorize,
-        {"slots": "slots", END: END},
+        {"auth_email": "auth_email", "slots": "slots", END: END},
     )
     # Normally ask for the OTP and stop: the code arrives in the next user turn,
     # where `entry` resumes at `auth_otp`. If the user changed topic instead,

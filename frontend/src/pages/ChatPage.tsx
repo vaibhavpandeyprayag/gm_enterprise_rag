@@ -5,6 +5,7 @@ import Sidebar from '../components/Sidebar'
 import MessageBubble from '../components/MessageBubble'
 import Composer from '../components/Composer'
 import FilesPanel from '../components/FilesPanel'
+import BankOpsModal from '../components/BankOpsModal'
 import EmptyState from '../components/EmptyState'
 import ThemeToggle from '../theme/ThemeToggle'
 
@@ -33,6 +34,8 @@ export default function ChatPage() {
   const [notice, setNotice] = useState<Notice | null>(null)
   const [files, setFiles] = useState<FileRecord[]>([])
   const [filesOpen, setFilesOpen] = useState(false)
+  const [filesMode, setFilesMode] = useState<'upload' | 'library'>('upload')
+  const [bankOpsOpen, setBankOpsOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -76,6 +79,17 @@ export default function ChatPage() {
     } catch (error) {
       setNotice({ kind: 'error', text: `Could not load chat: ${errorText(error)}` })
     }
+  }, [])
+
+  const openLibrary = useCallback(() => {
+    setFilesMode('library')
+    setFilesOpen(true)
+    setSidebarOpen(false)
+  }, [])
+
+  const openUploader = useCallback(() => {
+    setFilesMode('upload')
+    setFilesOpen(true)
   }, [])
 
   const newChat = useCallback(() => {
@@ -195,23 +209,35 @@ export default function ChatPage() {
         onRename={(id, title) => void renameConversation(id, title)}
         onDelete={(id) => void removeConversation(id)}
         onClose={() => setSidebarOpen(false)}
-        onOpenFiles={() => setFilesOpen(true)}
+        onOpenFiles={openLibrary}
       />
 
       <div className="main">
         <header className="topbar">
-          <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M4 7h16M4 12h16M4 17h16" />
-            </svg>
+          <button className="icon-btn menu-btn" onClick={() => setSidebarOpen((v) => !v)} aria-label={sidebarOpen ? 'Close menu' : 'Open menu'}>
+            {sidebarOpen ? (
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 7h16M4 12h16M4 17h16" />
+              </svg>
+            )}
           </button>
-          <h1 className="chat-title" title="Double-click to rename">
-            {activeTitle}
-          </h1>
+          <div className="chat-title-group">
+            <span className="chat-kicker">Nexora Bank AI</span>
+            <h1 className="chat-title" title={activeTitle}>
+              {activeTitle}
+            </h1>
+          </div>
           <div className="topbar-actions">
             <ThemeToggle />
-            <button className="ghost-btn" onClick={() => setFilesOpen(true)}>
-              Files
+            <button className="ghost-btn" onClick={openLibrary}>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+              </svg>
+              Knowledge Library
               <span className="count">{files.length}</span>
             </button>
           </div>
@@ -239,8 +265,9 @@ export default function ChatPage() {
               <article className="msg msg-assistant">
                 <div className="avatar" aria-hidden>
                   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8">
-                    <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
-                    <circle cx="12" cy="12" r="4" />
+                    <path d="M4 10V7a2 2 0 012-2h12a2 2 0 012 2v3" />
+                    <rect x="3" y="10" width="18" height="10" rx="2" />
+                    <path d="M9 14h6" />
                   </svg>
                 </div>
                 <div className="msg-body">
@@ -258,7 +285,8 @@ export default function ChatPage() {
         <Composer
           disabled={pending}
           onSubmit={(text) => void send(text)}
-          onAttach={() => setFilesOpen(true)}
+          onAttach={openUploader}
+          onBankOps={() => setBankOpsOpen(true)}
         />
       </div>
 
@@ -269,6 +297,15 @@ export default function ChatPage() {
           onUpload={handleUpload}
           onAddUrl={handleAddUrl}
           onDelete={(id) => void handleDeleteFile(id)}
+          mode={filesMode}
+        />
+      )}
+
+      {bankOpsOpen && (
+        <BankOpsModal
+          open={bankOpsOpen}
+          onClose={() => setBankOpsOpen(false)}
+          onSelect={(prompt) => void send(prompt)}
         />
       )}
     </div>

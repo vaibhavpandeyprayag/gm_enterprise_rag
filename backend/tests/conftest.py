@@ -166,8 +166,25 @@ class Fakes:
         )
 
     def _extract_field(self, field: Any, question: str, history: Any, settings: Any):
-        value = self.slot_value if self.slot_value is not None else question
-        return SimpleNamespace(action=self.slot_action, value=value)
+        if self.slot_action == "cancel":
+            return SimpleNamespace(action="cancel", value=None)
+        if self.slot_value is not None:
+            return SimpleNamespace(action="provide", value=self.slot_value)
+
+        # Mimic the real extractor: only return a value when this message
+        # actually contains something for this field.
+        text = (question or "").lower()
+        if field.name == "leaf_count":
+            value = question if any(char.isdigit() for char in text) else None
+        elif field.name == "delivery_preference":
+            value = (
+                question
+                if any(word in text for word in ("home", "branch", "courier"))
+                else None
+            )
+        else:
+            value = question
+        return SimpleNamespace(action="provide", value=value)
 
     def _answer_question(self, question: str, history: Any, user_id: str):
         return SimpleNamespace(

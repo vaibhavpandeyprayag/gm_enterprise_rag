@@ -97,6 +97,9 @@ class BankTask:
     summarize: Callable[[Mapping[str, Any]], str]
     execute: Callable[[Any, ExecutionContext], dict[str, Any]]
     format_result: Callable[[dict[str, Any]], str]
+    # Optional upfront list of everything a multi-field request needs. Shown on
+    # the first slot prompt so the user can supply all details in one message.
+    requirements: str = ""
 
 
 def _execute_balance(tools: Any, ctx: ExecutionContext) -> dict[str, Any]:
@@ -242,6 +245,12 @@ TASKS: dict[str, BankTask] = {
         ),
         execute=_execute_chequebook,
         format_result=_format_chequebook,
+        requirements=(
+            "To order a chequebook I need two details:\n"
+            "- How many cheque leaves you'd like (10-200)\n"
+            "- Delivery preference: home, branch, or courier\n\n"
+            "You can send both in one message."
+        ),
     ),
     "block_debit_card": BankTask(
         key="block_debit_card",

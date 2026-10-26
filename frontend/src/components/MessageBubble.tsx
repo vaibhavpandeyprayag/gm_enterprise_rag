@@ -59,14 +59,15 @@ export default function MessageBubble({ message }: { message: Message }) {
 
   return (
     <article className={`msg ${isUser ? 'msg-user' : 'msg-assistant'}`}>
-      {!isUser && (
-        <div className="avatar" aria-hidden>
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8">
-            <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
-            <circle cx="12" cy="12" r="4" />
-          </svg>
-        </div>
-      )}
+        {!isUser && (
+          <div className="avatar" aria-hidden>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M4 10V7a2 2 0 012-2h12a2 2 0 012 2v3" />
+              <rect x="3" y="10" width="18" height="10" rx="2" />
+              <path d="M9 14h6" />
+            </svg>
+          </div>
+        )}
       <div className="msg-body">
         {isUser ? (
           <div className="user-bubble">{message.content}</div>

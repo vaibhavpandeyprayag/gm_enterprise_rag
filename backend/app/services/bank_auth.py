@@ -25,7 +25,11 @@ from typing import Any
 from app.config import get_settings
 from app.services import mongo
 
-_EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+# Deliberately stricter than "anything@anything.anything": stops at punctuation
+# so "My email is vp5@xyz.com." yields "vp5@xyz.com" (not the trailing dot).
+_EMAIL_PATTERN = re.compile(
+    r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"
+)
 
 
 class BankAuthError(Exception):

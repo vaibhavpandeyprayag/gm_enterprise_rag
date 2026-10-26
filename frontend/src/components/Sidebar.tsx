@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { ConversationSummary } from '../types'
 
 interface Props {
@@ -14,7 +15,6 @@ interface Props {
   onOpenFiles: () => void
 }
 
-/** Left pane: brand, new-chat action, conversation history, files entry. */
 export default function Sidebar({
   open,
   conversations,
@@ -29,6 +29,8 @@ export default function Sidebar({
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [deleteTitle, setDeleteTitle] = useState('')
   const editInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -47,29 +49,33 @@ export default function Sidebar({
         <div className="sidebar-head">
           <div className="brand">
             <span className="brand-mark" aria-hidden>
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
-                <circle cx="12" cy="12" r="4" />
+              <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M3 10h18M5 10V7a2 2 0 012-2h10a2 2 0 012 2v3" />
+                <rect x="3" y="10" width="18" height="10" rx="2" />
+                <path d="M8 14h3M13 14h3" />
               </svg>
             </span>
-            <span className="brand-name">GenRAG</span>
+            <div className="brand-text">
+              <span className="brand-name">Nexora Bank</span>
+              <span className="brand-sub">AI ASSISTANT</span>
+            </div>
           </div>
-          <button className="icon-btn" onClick={onClose} aria-label="Close sidebar">
+          <button className="icon-btn sidebar-close" onClick={onClose} aria-label="Close sidebar">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M6 6l12 12M18 6L6 18" />
             </svg>
           </button>
         </div>
 
-        <button className="new-chat" onClick={onNew}>
+        <button className="new-chat" onClick={() => { onNew(); onClose(); }}>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M12 5v14M5 12h14" />
           </svg>
-          New chat
+          New conversation
         </button>
 
         <nav className="conv-section" aria-label="Conversations">
-          <div className="conv-section-label">Chats</div>
+          <div className="conv-section-label">CONVERSATIONS</div>
           {conversations.length === 0 && <div className="conv-empty">No conversations yet</div>}
           <ul className="conv-list">
             {conversations.map((conv) => {
@@ -91,8 +97,11 @@ export default function Sidebar({
                     />
                   ) : (
                     <>
-                      <button className="conv-title" onClick={() => onSelect(conv.conversation_id)} title={conv.title}>
-                        {conv.title}
+                      <button className="conv-title" onClick={() => { onSelect(conv.conversation_id); onClose(); }} title={conv.title}>
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8">
+                          <path d="M4 6h16M4 12h10M4 18h14" />
+                        </svg>
+                        <span>{conv.title}</span>
                       </button>
                       <span className="conv-actions">
                         <button
@@ -111,7 +120,8 @@ export default function Sidebar({
                           className="icon-btn tiny danger"
                           aria-label="Delete chat"
                           onClick={() => {
-                            if (window.confirm(`Delete chat "${conv.title}"?`)) onDelete(conv.conversation_id)
+                            setDeleteId(conv.conversation_id)
+                            setDeleteTitle(conv.title)
                           }}
                         >
                           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
@@ -128,15 +138,46 @@ export default function Sidebar({
         </nav>
 
         <div className="sidebar-foot">
-          <button className="files-btn" onClick={onOpenFiles}>
+          <button className="files-btn" onClick={() => { onOpenFiles(); onClose(); }}>
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M4 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V6z" />
+              <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
             </svg>
-            Knowledge files
+            Knowledge Library
             <span className="count">{fileCount}</span>
           </button>
         </div>
       </aside>
+
+      {deleteId && createPortal(
+        <div className="modal-scrim" onClick={() => setDeleteId(null)} style={{ zIndex: 1000 }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <div className="modal-head">
+              <h2>Delete conversation?</h2>
+              <button className="icon-btn" onClick={() => setDeleteId(null)} aria-label="Close">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </div>
+            <p style={{ margin: 0, color: 'var(--text-dim)' }}>
+              "{deleteTitle}" will be permanently removed.
+            </p>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '8px' }}>
+              <button className="ghost-btn" onClick={() => setDeleteId(null)}>Cancel</button>
+              <button
+                className="primary-btn"
+                onClick={() => {
+                  if (deleteId) onDelete(deleteId)
+                  setDeleteId(null)
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   )
 }

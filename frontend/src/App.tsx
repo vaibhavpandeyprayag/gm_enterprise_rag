@@ -1,7 +1,7 @@
 import { ThemeProvider } from './theme/ThemeContext'
 import ChatPage from './pages/ChatPage'
 
-/** The app opens straight into the RAG workspace - there is no login. */
+/** The app opens straight into the Nexora Bank AI workspace. */
 export default function App() {
   return (
     <ThemeProvider>

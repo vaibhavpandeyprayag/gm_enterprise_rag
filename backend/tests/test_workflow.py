@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.services.bank_auth import extract_email
 from app.services.bank_tasks import (
     DOCUMENT_QA,
     InputError,
@@ -42,6 +43,32 @@ def test_balance_requires_auth_even_when_user_claims_to_be_verified(graph, fakes
     assert "email" in result["response"].lower()
     assert fakes.sessions.sessions == {}
     assert fakes.tools.calls == []
+
+
+def test_initial_bank_request_can_include_the_email(graph, fakes):
+    fakes.intent = "get_account_balance"
+
+    result = send(graph, f"Show my balance. My email is {EMAIL}")
+
+    assert result["status"] == "needs_auth"
+    assert result["auth_stage"] == "otp"
+    assert EMAIL in result["response"]
+    assert fakes.sessions.sessions == {}
+
+    result = send(graph, OTP)
+    assert result["status"] == "ok"
+    assert [call["action"] for call in fakes.tools.calls] == ["balance"]
+
+
+def test_initial_bank_request_with_unknown_email_stays_on_email_prompt(graph, fakes):
+    fakes.intent = "get_account_balance"
+
+    result = send(graph, "Show my balance. My email is stranger@example.com")
+
+    assert result["status"] == "needs_auth"
+    assert result["auth_stage"] == "email"
+    assert "couldn't find" in result["response"].lower()
+    assert fakes.sessions.sessions == {}
 
 
 def test_balance_flow_authenticates_then_reads_balance(graph, fakes):
@@ -92,11 +119,16 @@ def test_chequebook_collects_slots_confirms_and_executes_once(graph, fakes):
 
     result = authenticate(graph)
     assert result["status"] == "needs_input"
-    assert "cheque leaves" in result["response"].lower()
+    lowered = result["response"].lower()
+    assert "cheque leaves" in lowered
+    assert "delivery" in lowered
+    assert "home, branch, or courier" in lowered
 
     result = send(graph, "50")
     assert result["status"] == "needs_input"
     assert "delivered" in result["response"].lower()
+    # The leaf count was accepted, so it is not asked again.
+    assert "cheque leaves" not in result["response"].lower()
 
     result = send(graph, "home")
     assert result["status"] == "needs_confirmation"
@@ -111,6 +143,53 @@ def test_chequebook_collects_slots_confirms_and_executes_once(graph, fakes):
     assert call["leaf_count"] == 50
     assert call["delivery_preference"] == "home"
     assert call["execution_key"]
+
+
+def test_chequebook_accepts_all_details_in_one_message(graph, fakes):
+    fakes.intent = "issue_chequebook"
+    send(graph, "Order a chequebook")
+    assert authenticate(graph)["status"] == "needs_input"
+
+    result = send(graph, "50 leaves, delivered to my home")
+
+    assert result["status"] == "needs_confirmation"
+    assert "Leaves: 50" in result["response"]
+    assert "Delivery: home" in result["response"]
+    assert fakes.tools.calls == []
+
+    result = send(graph, "yes")
+    assert result["status"] == "ok"
+    call = fakes.tools.calls[0]
+    assert call["leaf_count"] == 50
+    assert call["delivery_preference"] == "home"
+
+
+def test_chequebook_keeps_valid_details_when_another_is_invalid(graph, fakes):
+    fakes.intent = "issue_chequebook"
+    send(graph, "Order a chequebook")
+    authenticate(graph)
+
+    result = send(graph, "5 leaves, delivered to my home")
+
+    assert result["status"] == "needs_input"
+    assert "between 10 and 200" in result["response"]
+    assert result["collected"]["delivery_preference"] == "home"
+    # Only the invalid leaf count needs another answer.
+    assert "delivered" not in result["response"].lower()
+
+
+def test_cancelling_during_slot_filling_writes_nothing(graph, fakes):
+    fakes.intent = "issue_chequebook"
+    send(graph, "Order a chequebook")
+    authenticate(graph)
+    fakes.slot_action = "cancel"
+
+    result = send(graph, "cancel")
+
+    assert result["status"] == "cancelled"
+    assert result["awaiting_field"] is None
+    assert result["operation"] is None
+    assert fakes.tools.calls == []
 
 
 def test_invalid_slot_reasks_the_same_question(graph, fakes):
@@ -280,3 +359,10 @@ def test_delivery_validator():
     assert _parse_delivery("send by courier") == "courier"
     with pytest.raises(InputError):
         _parse_delivery("drone")
+
+
+def test_email_extraction_ignores_surrounding_punctuation():
+    assert extract_email("My email is Vp5@XYZ.com.") == "vp5@xyz.com"
+    assert extract_email("<vp5@xyz.com>, thanks") == "vp5@xyz.com"
+    assert extract_email("vp5@xyz.com?") == "vp5@xyz.com"
+    assert extract_email("no email here") is None

@@ -21,8 +21,12 @@ import io
 import os
 
 import pandas as pd
+import numpy as np
 from langchain_core.documents import Document
 from langchain_text_splitters import MarkdownTextSplitter, RecursiveCharacterTextSplitter
+from io import BytesIO
+from PIL import Image
+from rapidocr_onnxruntime import RapidOCR
 
 from app.config import get_settings
 
@@ -136,14 +140,168 @@ def _load_pdf(data: bytes, filename: str) -> list[Document]:
     import fitz  # PyMuPDF
 
     documents: list[Document] = []
+    ocr = RapidOCR()
+
     with fitz.open(stream=data, filetype="pdf") as pdf:
         for page_number, page in enumerate(pdf, start=1):
-            text = page.get_text("text").strip()
-            if not text:
-                continue
-            documents.extend(
-                _split_plain_text(text, {"source": filename, "page": page_number})
-            )
+            metadata = {"source": filename, "page": page_number}
+
+            # 1. Detect tables and convert each row into a self-contained record.
+            table_bboxes = []
+
+            try:
+                found_tables = page.find_tables().tables
+            except Exception:
+                found_tables = []
+
+            for table_index, table in enumerate(found_tables):
+                table_bbox = fitz.Rect(table.bbox)
+                table_bboxes.append(table_bbox)
+
+                try:
+                    rows = table.extract()
+                    if not rows:
+                        continue
+
+                    # Obtain column names from the detected table header.
+                    headers = [
+                        str(h).strip() if h is not None else ""
+                        for h in table.header.names
+                    ]
+
+                    # If the header is part of the extracted rows, remove it.
+                    if (
+                        not table.header.external
+                        and rows
+                        and [str(c or "").strip() for c in rows[0]]
+                        == headers
+                    ):
+                        rows = rows[1:]
+
+                    for row_index, row in enumerate(rows, start=1):
+                        if not row:
+                            continue
+
+                        # Ignore completely empty rows.
+                        values = [
+                            str(cell).strip() if cell is not None else ""
+                            for cell in row
+                        ]
+
+                        if not any(values):
+                            continue
+
+                        # Build self-contained records.
+                        fields = []
+                        for column_index, value in enumerate(values):
+                            if not value:
+                                continue
+
+                            label = (
+                                headers[column_index]
+                                if column_index < len(headers)
+                                and headers[column_index]
+                                else f"Column {column_index + 1}"
+                            )
+                            fields.append(f"{label}: {value}")
+
+                        if not fields:
+                            continue
+
+                        table_text = "\n".join(fields)
+
+                        table_metadata = {
+                            **metadata,
+                            "content_type": "table_row",
+                            "table_index": table_index,
+                            "row_index": row_index,
+                        }
+
+                        documents.extend(
+                            _split_plain_text(table_text, table_metadata)
+                        )
+
+                except Exception as exc:
+                    print(
+                        f"Table extraction failed on page {page_number} "
+                        f"of {filename}: {exc}"
+                    )
+
+            # 2. Extract ordinary text, excluding blocks inside detected tables.
+            text_blocks = page.get_text("blocks")
+            plain_text_parts = []
+
+            for block in text_blocks:
+                # Text blocks contain coordinates and block type.
+                if len(block) < 7 or block[6] != 0:
+                    continue
+
+                block_bbox = fitz.Rect(block[:4])
+                block_text = block[4].strip()
+
+                if not block_text:
+                    continue
+
+                # Avoid extracting table contents twice.
+                overlaps_table = any(
+                    block_bbox.intersects(table_bbox)
+                    and (
+                        block_bbox & table_bbox
+                    ).get_area() / max(block_bbox.get_area(), 1) > 0.5
+                    for table_bbox in table_bboxes
+                )
+
+                if not overlaps_table:
+                    plain_text_parts.append(block_text)
+
+            text = "\n".join(plain_text_parts).strip()
+
+            if text:
+                documents.extend(_split_plain_text(text, metadata))
+
+            # 3. OCR images, preserving the existing implementation.
+            page_dict = page.get_text("dict")
+
+            for block in page_dict["blocks"]:
+                if block.get("type") != 1:
+                    continue
+
+                image_bytes = block.get("image")
+                if not image_bytes:
+                    continue
+
+                try:
+                    with Image.open(BytesIO(image_bytes)) as image:
+                        image = image.convert("RGB")
+                        image_array = np.array(image)
+                        result, _ = ocr(image_array)
+
+                    if not result:
+                        continue
+
+                    image_text = "\n".join(
+                        str(item[1]).strip()
+                        for item in result
+                        if len(item) >= 2 and str(item[1]).strip()
+                    )
+
+                    if image_text:
+                        image_metadata = {
+                            **metadata,
+                            "content_type": "image_ocr",
+                            "image_bbox": block.get("bbox"),
+                        }
+
+                        documents.extend(
+                            _split_plain_text(image_text, image_metadata)
+                        )
+
+                except Exception as exc:
+                    print(
+                        f"OCR failed on page {page_number} "
+                        f"of {filename}: {exc}"
+                    )
+
     return documents
 
 

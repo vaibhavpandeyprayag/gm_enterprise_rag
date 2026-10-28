@@ -14,7 +14,7 @@
             "cwd": "${workspaceFolder}/backend",
             "python": "${workspaceFolder}/.venv/Scripts/python.exe",
             "console": "integratedTerminal",
-            "justMyCode": true
+            "justMyCode": false
         }
     ]
 }

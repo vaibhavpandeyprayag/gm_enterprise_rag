@@ -69,7 +69,7 @@ def create_app() -> FastAPI:
     app.include_router(chat.router)
     app.include_router(banking.router)
 
-    @app.get("/api/health", tags=["health"])
+    @app.get("/health", tags=["health"])
     def health() -> JSONResponse:
         """Liveness + config summary (no secrets)."""
         mongo_ok = mongo.ping()
